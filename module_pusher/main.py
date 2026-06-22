@@ -24,7 +24,7 @@ def append_posted_url(url):
     with open(POSTED_URLS_FILE, "a") as f:
         f.write(f"{url}\n")
 
-def push_to_medium(url):
+def push_to_medium(url, title):
     if not os.path.exists(AUTH_JSON_FILE):
         print(f"Error: {AUTH_JSON_FILE} not found. Cannot authenticate with Medium.")
         sys.exit(1)
@@ -37,8 +37,8 @@ def push_to_medium(url):
 
     print("Starting undetected-chromedriver...")
     options = uc.ChromeOptions()
-    # options.add_argument("--headless") # Run visibly to bypass CF
     driver = uc.Chrome(options=options, version_main=149)
+    wait = WebDriverWait(driver, 30)
     
     try:
         # Navigate to 404 page first to set cookies for medium.com
@@ -65,44 +65,55 @@ def push_to_medium(url):
         except:
             pass
 
-        print(f"Navigating to Medium import page...")
-        driver.get("https://medium.com/p/import")
-        
-        wait = WebDriverWait(driver, 30)
-        print("Waiting for URL input field...")
-        # The input field is actually a contenteditable div with class js-importUrl
-        url_input = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "div.js-importUrl")))
-        
-        print(f"Submitting URL: {url}")
-        url_input.click() # Focus the div
-        # Using driver to send keys to the active element just in case
-        actions = ActionChains(driver)
-        actions.send_keys(url)
-        actions.perform()
-        
-        print("Waiting for Import button...")
-        # Give the UI a moment to register the input
-        time.sleep(1)
-        import_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Import')]")))
-        import_btn.click()
-        
-        try:
-            # Check for "Import failed" text first
-            time.sleep(2)
-            if "Import failed" in driver.page_source:
-                print(f"Failed to push {url} to Medium: Medium server could not fetch the blog post.")
-                driver.save_screenshot("debug_medium_uc.png")
-                return False
+        # 1. Go to blog post
+        print(f"Navigating to original article: {url}...")
+        driver.get(url)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".ops-article-content")))
+        time.sleep(3) # Let images load
 
-            publish_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Publish')]")))
-            print(f"Successfully imported {url} to Medium (Saved as Draft).")
-            return True
-        except:
-            if "Import failed" in driver.page_source:
-                print(f"Failed to push {url} to Medium: Medium server could not fetch the blog post.")
-                return False
-            print("Could not find Publish button, but import may have succeeded.")
-            return True
+        # 2. Select article content
+        print("Copying article content to clipboard...")
+        driver.execute_script("""
+            const range = document.createRange();
+            range.selectNodeContents(document.querySelector('.ops-article-content'));
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        """)
+        time.sleep(1)
+
+        # 3. Copy to clipboard
+        actions = ActionChains(driver)
+        actions.key_down(Keys.CONTROL).send_keys('c').key_up(Keys.CONTROL).perform()
+        time.sleep(1)
+
+        # 4. Go to Medium new story
+        print("Navigating to Medium new story editor...")
+        driver.get("https://medium.com/new-story")
+        time.sleep(3)
+
+        # 5. Type title
+        print(f"Typing title: {title}")
+        title_element = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "h3.graf--title")))
+        title_element.click()
+        title_element.send_keys(title)
+        time.sleep(1)
+
+        # 6. Press Enter to go to body
+        actions = ActionChains(driver)
+        actions.send_keys(Keys.RETURN)
+        actions.perform()
+        time.sleep(1)
+
+        # 7. Paste content
+        print("Pasting content...")
+        actions = ActionChains(driver)
+        actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
+        time.sleep(5) # wait for medium to auto-save and process images
+        
+        print(f"Successfully pushed {url} to Medium (Saved as Draft).")
+        return True
+        
     except Exception as e:
         print(f"Failed to push {url} to Medium: {e}")
         try:
@@ -142,8 +153,9 @@ def main():
     
     for entry in reversed(entries):
         link = entry.get('link')
+        title = entry.get('title')
         if link and link not in posted_urls:
-            new_entries.append(link)
+            new_entries.append((link, title))
 
     if not new_entries:
         print("No new articles to push to Medium.")
@@ -152,9 +164,9 @@ def main():
     print(f"Found {len(new_entries)} new article(s) to push.")
     
     success_count = 0
-    for url in new_entries:
-        print(f"Processing: {url}")
-        if push_to_medium(url):
+    for url, title in new_entries:
+        print(f"Processing: {title} ({url})")
+        if push_to_medium(url, title):
             append_posted_url(url)
             success_count += 1
         else:
