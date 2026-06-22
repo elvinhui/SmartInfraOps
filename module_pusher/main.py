@@ -1,6 +1,13 @@
 import os
 import sys
-from playwright.sync_api import sync_playwright
+import time
+import json
+import urllib.request
+import undetected_chromedriver as uc
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.keys import Keys
 
 RSS_URL = os.getenv("RSS_URL", "https://smartinfralog.com/index.xml")
 POSTED_URLS_FILE = os.path.join(os.path.dirname(__file__), "posted_urls.txt")
@@ -10,7 +17,6 @@ def load_posted_urls():
     if not os.path.exists(POSTED_URLS_FILE):
         return set()
     with open(POSTED_URLS_FILE, "r") as f:
-        # Ignore comments and empty lines
         return set(line.strip() for line in f if line.strip() and not line.startswith("#"))
 
 def append_posted_url(url):
@@ -18,57 +24,83 @@ def append_posted_url(url):
         f.write(f"{url}\n")
 
 def push_to_medium(url):
-    with sync_playwright() as p:
-        if not os.path.exists(AUTH_JSON_FILE):
-            print(f"Error: {AUTH_JSON_FILE} not found. Cannot authenticate with Medium.")
-            sys.exit(1)
+    if not os.path.exists(AUTH_JSON_FILE):
+        print(f"Error: {AUTH_JSON_FILE} not found. Cannot authenticate with Medium.")
+        sys.exit(1)
 
-        print(f"Starting browser with state from {AUTH_JSON_FILE}...")
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(storage_state=AUTH_JSON_FILE)
-        page = context.new_page()
+    print(f"Loading cookies from {AUTH_JSON_FILE}...")
+    with open(AUTH_JSON_FILE, "r") as f:
+        auth_data = json.load(f)
+    
+    cookies = auth_data.get("cookies", [])
+
+    print("Starting undetected-chromedriver...")
+    options = uc.ChromeOptions()
+    # options.add_argument("--headless") # Run visibly to bypass CF
+    driver = uc.Chrome(options=options, version_main=149)
+    
+    try:
+        # Navigate to 404 page first to set cookies for medium.com
+        print("Navigating to medium.com to set cookies...")
+        driver.get("https://medium.com/404")
+        
+        for cookie in cookies:
+            cookie_dict = {
+                "name": cookie["name"],
+                "value": cookie["value"],
+                "domain": cookie.get("domain", ".medium.com"),
+                "path": cookie.get("path", "/")
+            }
+            if "secure" in cookie: cookie_dict["secure"] = cookie["secure"]
+            if "httpOnly" in cookie: cookie_dict["httpOnly"] = cookie["httpOnly"]
+            
+            try:
+                driver.add_cookie(cookie_dict)
+            except Exception as e:
+                pass # Ignore if invalid
+
+        try:
+            driver.execute_script("window.localStorage.setItem('viewer-status|is-logged-in', 'true');")
+        except:
+            pass
+
+        print(f"Navigating to Medium import page...")
+        driver.get("https://medium.com/p/import")
+        
+        wait = WebDriverWait(driver, 30)
+        print("Waiting for URL input field...")
+        url_input = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "input[type='url']")))
+        
+        print(f"Submitting URL: {url}")
+        url_input.send_keys(url)
+        url_input.send_keys(Keys.RETURN)
+        
+        print("Waiting for Import button...")
+        import_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Import')]")))
+        import_btn.click()
         
         try:
-            print(f"Navigating to Medium import page...")
-            page.goto("https://medium.com/p/import", timeout=60000)
-            
-            # Check if we are actually logged in by looking for import input
-            page.wait_for_selector('input[type="url"]', timeout=30000)
-            
-            print(f"Submitting URL: {url}")
-            page.fill('input[type="url"]', url)
-            page.keyboard.press("Enter")
-            
-            # Wait for "Import" button
-            page.wait_for_selector('button:has-text("Import")', timeout=30000)
-            page.click('button:has-text("Import")')
-            
-            # Wait for the editor to load or for import to finish
-            page.wait_for_load_state('networkidle', timeout=60000)
-            
-            # Check if it loaded the editor by looking for 'Publish' button
-            try:
-                page.wait_for_selector('button:has-text("Publish")', timeout=30000)
-                # At this point, the article is imported as a draft on Medium.
-                # The canonical URL is automatically set by Medium's import tool.
-            except Exception as e:
-                print("Could not find Publish button, but import may have succeeded.")
-                
-            print(f"Successfully imported {url} to Medium (Saved as Draft).")
-            return True
-        except Exception as e:
-            print(f"Failed to push {url} to Medium: {e}")
-            return False
-        finally:
-            browser.close()
+            wait.until(EC.visibility_of_element_located((By.XPATH, "//button[contains(text(), 'Publish')]")))
+        except Exception:
+            print("Could not find Publish button, but import may have succeeded.")
 
-import urllib.request
-import json
+        print(f"Successfully imported {url} to Medium (Saved as Draft).")
+        return True
+    except Exception as e:
+        print(f"Failed to push {url} to Medium: {e}")
+        try:
+            driver.save_screenshot("debug_medium_uc.png")
+            print("Saved debug screenshot to debug_medium_uc.png")
+        except:
+            pass
+        return False
+    finally:
+        driver.quit()
 
 def main():
     print(f"Fetching RSS feed from {RSS_URL} via rss2json...")
     api_url = f"https://api.rss2json.com/v1/api.json?rss_url={RSS_URL}"
-    req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+    req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
     
     try:
         with urllib.request.urlopen(req) as response:
@@ -89,8 +121,6 @@ def main():
     posted_urls = load_posted_urls()
     new_entries = []
     
-    # Process from oldest to newest if you prefer, but usually iterating entries is fine
-    # entries is usually newest first. We reverse to push oldest first
     for entry in reversed(entries):
         link = entry.get('link')
         if link and link not in posted_urls:
@@ -102,7 +132,6 @@ def main():
 
     print(f"Found {len(new_entries)} new article(s) to push.")
     
-    # Push articles
     success_count = 0
     for url in new_entries:
         print(f"Processing: {url}")
@@ -111,7 +140,6 @@ def main():
             success_count += 1
         else:
             print(f"Stopping execution due to failure on {url}.")
-            # Stop execution to prevent further failures and throw Exit Code 1
             sys.exit(1)
             
     print(f"Successfully pushed {success_count} articles.")
