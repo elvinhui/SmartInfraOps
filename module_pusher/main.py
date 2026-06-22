@@ -8,6 +8,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
 
 RSS_URL = os.getenv("RSS_URL", "https://smartinfralog.com/index.xml")
 POSTED_URLS_FILE = os.path.join(os.path.dirname(__file__), "posted_urls.txt")
@@ -69,13 +70,19 @@ def push_to_medium(url):
         
         wait = WebDriverWait(driver, 30)
         print("Waiting for URL input field...")
-        url_input = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "input[type='url']")))
+        # The input field is actually a contenteditable div with class js-importUrl
+        url_input = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "div.js-importUrl")))
         
         print(f"Submitting URL: {url}")
-        url_input.send_keys(url)
-        url_input.send_keys(Keys.RETURN)
+        url_input.click() # Focus the div
+        # Using driver to send keys to the active element just in case
+        actions = ActionChains(driver)
+        actions.send_keys(url)
+        actions.perform()
         
         print("Waiting for Import button...")
+        # Give the UI a moment to register the input
+        time.sleep(1)
         import_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Import')]")))
         import_btn.click()
         
@@ -91,6 +98,8 @@ def push_to_medium(url):
         try:
             driver.save_screenshot("debug_medium_uc.png")
             print("Saved debug screenshot to debug_medium_uc.png")
+            with open("debug_medium_page.html", "w", encoding="utf-8") as f:
+                f.write(driver.page_source)
         except:
             pass
         return False
