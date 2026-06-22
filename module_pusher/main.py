@@ -31,6 +31,15 @@ def push_to_medium(url):
         try:
             print(f"Navigating to Medium import page...")
             page.goto("https://medium.com/p/import", timeout=60000)
+            page.wait_for_load_state('domcontentloaded', timeout=30000)
+            
+            # Debug: log what page we actually landed on
+            print(f"DEBUG: Current URL = {page.url}")
+            print(f"DEBUG: Page title = {page.title()}")
+            page.screenshot(path="debug_medium_page.png", full_page=True)
+            print("DEBUG: Screenshot saved to debug_medium_page.png")
+            print(f"DEBUG: Page content (first 2000 chars):")
+            print(page.content()[:2000])
             
             # Check if we are actually logged in by looking for import input
             page.wait_for_selector('input[type="url"]', timeout=30000)
