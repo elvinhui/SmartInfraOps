@@ -65,10 +65,12 @@ def push_to_medium(url):
 
 def main():
     print(f"Fetching RSS feed from {RSS_URL}...")
+    # Use a standard browser User-Agent to prevent 403 Forbidden from bot protection (e.g. Cloudflare)
+    feedparser.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     feed = feedparser.parse(RSS_URL)
     
     if feed.bozo and len(feed.entries) == 0:
-        print("Warning: RSS feed could not be fully parsed and contains no entries.")
+        print(f"Warning: RSS feed could not be fully parsed and contains no entries. Error: {feed.get('bozo_exception', 'Unknown')}")
         sys.exit(1)
         
     posted_urls = load_posted_urls()
