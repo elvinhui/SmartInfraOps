@@ -9,7 +9,7 @@ echo.
 
 if not exist ".venv" (
     echo Creating virtual environment...
-    python -m venv .venv
+    py -m venv .venv
 )
 
 echo Installing dependencies...
@@ -20,7 +20,7 @@ echo.
 
 if not exist "medium_auth.json" (
     echo Running first-time login...
-    python module_pusher\login_medium.py
+    py module_pusher\login_medium.py
 )
 
 echo.
