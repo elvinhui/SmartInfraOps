@@ -14,13 +14,13 @@ if not exist ".venv" (
 
 echo Installing dependencies...
 call .venv\Scripts\activate.bat
-pip install -r module_pusher\requirements.txt
+python -m pip install -r module_pusher\requirements.txt
 playwright install chromium
 echo.
 
 if not exist "medium_auth.json" (
     echo Running first-time login...
-    py module_pusher\login_medium.py
+    python module_pusher\login_medium.py
 )
 
 echo.
