@@ -8,8 +8,8 @@ echo ====================================================
 echo.
 
 if not exist ".venv" (
-    echo Creating virtual environment...
-    py -m venv .venv
+    echo Creating virtual environment with Python 3.11...
+    py -3.11 -m venv .venv
 )
 
 echo Installing dependencies...
