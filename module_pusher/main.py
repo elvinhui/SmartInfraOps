@@ -1,11 +1,13 @@
 import os
 import sys
 import urllib.request
+import urllib.parse
 import json
 
 RSS_URL = os.getenv("RSS_URL", "https://smartinfralog.com/index.xml")
 POSTED_URLS_FILE = os.path.join(os.path.dirname(__file__), "posted_urls.txt")
-MEDIUM_TOKEN = os.getenv("MEDIUM_TOKEN")
+WHATSAPP_PHONE = os.getenv("WHATSAPP_PHONE_NUMBER")
+WHATSAPP_APIKEY = os.getenv("WHATSAPP_API_KEY")
 
 # --- Utility Functions ---
 
@@ -19,174 +21,95 @@ def append_posted_url(url):
     with open(POSTED_URLS_FILE, "a") as f:
         f.write(f"{url}\n")
 
-def medium_api_request(endpoint, method="GET", data=None):
-    """Make an authenticated request to the Medium API."""
-    url = f"https://api.medium.com/v1{endpoint}"
-    headers = {
-        "Authorization": f"Bearer {MEDIUM_TOKEN}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Accept-Charset": "utf-8",
-    }
+def send_whatsapp(message):
+    """Send a WhatsApp message via CallMeBot API."""
+    if not WHATSAPP_PHONE or not WHATSAPP_APIKEY:
+        print("  [WhatsApp] Credentials not configured, printing to console only.")
+        print(f"  [Message] {message}")
+        return False
+
+    encoded_msg = urllib.parse.quote_plus(message)
+    api_url = (
+        f"https://api.callmebot.com/whatsapp.php"
+        f"?phone={WHATSAPP_PHONE}"
+        f"&text={encoded_msg}"
+        f"&apikey={WHATSAPP_APIKEY}"
+    )
     
-    body = json.dumps(data).encode("utf-8") if data else None
-    req = urllib.request.Request(url, data=body, headers=headers, method=method)
-    
+    try:
+        req = urllib.request.Request(api_url)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            status = resp.getcode()
+            print(f"  [WhatsApp] Sent (HTTP {status})")
+            return True
+    except Exception as e:
+        print(f"  [WhatsApp] Failed to send: {e}")
+        return False
+
+def fetch_rss_entries():
+    """Fetch RSS entries via rss2json proxy."""
+    print(f"Fetching RSS feed from {RSS_URL} via rss2json...")
+    api_url = f"https://api.rss2json.com/v1/api.json?rss_url={RSS_URL}"
+    req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+
     with urllib.request.urlopen(req) as response:
-        return json.loads(response.read())
+        data = json.loads(response.read())
 
-def get_medium_user_id():
-    """Get the authenticated user's Medium ID."""
-    result = medium_api_request("/me")
-    user_id = result["data"]["id"]
-    print(f"Authenticated as: {result['data'].get('username', 'unknown')}")
-    return user_id
+    if data.get("status") != "ok":
+        raise RuntimeError(f"rss2json error: {data.get('message', 'Unknown')}")
 
-def fetch_article_html(url):
-    """Fetch the full HTML content of an article page."""
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    })
-    with urllib.request.urlopen(req, timeout=30) as response:
-        return response.read().decode("utf-8", errors="replace")
-
-def extract_article_content(html):
-    """Extract the main article title and body from Hugo-generated HTML."""
-    import re
-    
-    # Extract title from <title> tag or <h1>
-    title = "Untitled"
-    title_match = re.search(r'<title[^>]*>(.*?)</title>', html, re.DOTALL | re.IGNORECASE)
-    if title_match:
-        title = title_match.group(1).strip()
-        # Remove site name suffix like " | SmartInfraLog"
-        title = re.split(r'\s*[\|–—-]\s*SmartInfraLog', title)[0].strip()
-    
-    # Try to extract <article> content first (Hugo's typical structure)
-    article_match = re.search(r'<article[^>]*>(.*?)</article>', html, re.DOTALL | re.IGNORECASE)
-    if article_match:
-        body = article_match.group(1)
-    else:
-        # Fallback: extract main content area
-        main_match = re.search(r'<main[^>]*>(.*?)</main>', html, re.DOTALL | re.IGNORECASE)
-        if main_match:
-            body = main_match.group(1)
-        else:
-            # Last resort: use the RSS description
-            body = None
-    
-    return title, body
-
-def push_to_medium(user_id, article_url, rss_description=""):
-    """Push an article to Medium as a draft using the official API."""
-    print(f"  Fetching article content from {article_url}...")
-    
-    try:
-        html = fetch_article_html(article_url)
-        title, body_html = extract_article_content(html)
-    except Exception as e:
-        print(f"  Warning: Could not fetch article HTML: {e}")
-        title = article_url.split("/")[-2] if article_url.endswith("/") else article_url.split("/")[-1]
-        body_html = None
-    
-    # If we couldn't extract body, fall back to RSS description
-    if not body_html:
-        if rss_description:
-            body_html = f"<p>{rss_description}</p>"
-        else:
-            print(f"  Error: No content available for {article_url}")
-            return False
-    
-    # Build the post payload
-    post_data = {
-        "title": title,
-        "contentFormat": "html",
-        "content": body_html,
-        "canonicalUrl": article_url,
-        "publishStatus": "draft",
-    }
-    
-    print(f"  Publishing draft: \"{title}\"")
-    
-    try:
-        result = medium_api_request(f"/users/{user_id}/posts", method="POST", data=post_data)
-        post_url = result["data"].get("url", "unknown")
-        print(f"  ✓ Draft created: {post_url}")
-        return True
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8", errors="replace")
-        print(f"  ✗ Medium API error ({e.code}): {error_body}")
-        return False
-    except Exception as e:
-        print(f"  ✗ Failed to create draft: {e}")
-        return False
+    return data.get("items", [])
 
 # --- Main ---
 
 def main():
-    if not MEDIUM_TOKEN:
-        print("Error: MEDIUM_TOKEN environment variable is not set.")
-        print("Go to Medium → Settings → Security and apps → Integration tokens to generate one.")
-        sys.exit(1)
-    
-    # Step 1: Authenticate and get user ID
-    print("Authenticating with Medium API...")
+    # Step 1: Fetch RSS
     try:
-        user_id = get_medium_user_id()
+        entries = fetch_rss_entries()
     except Exception as e:
-        print(f"Error: Failed to authenticate with Medium: {e}")
+        print(f"Error: {e}")
         sys.exit(1)
-    
-    # Step 2: Fetch RSS feed
-    print(f"Fetching RSS feed from {RSS_URL} via rss2json...")
-    api_url = f"https://api.rss2json.com/v1/api.json?rss_url={RSS_URL}"
-    req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
-    
-    try:
-        with urllib.request.urlopen(req) as response:
-            data = json.loads(response.read())
-    except Exception as e:
-        print(f"Error fetching RSS feed: {e}")
-        sys.exit(1)
-    
-    if data.get("status") != "ok":
-        print(f"Error: rss2json returned: {data.get('message', 'Unknown')}")
-        sys.exit(1)
-    
-    entries = data.get("items", [])
+
     if not entries:
-        print("Warning: Feed contains no entries.")
+        print("Feed contains no entries.")
         sys.exit(1)
-    
-    # Step 3: Find new articles
+
+    # Step 2: Find new articles
     posted_urls = load_posted_urls()
-    new_entries = []
-    
-    for entry in reversed(entries):
+    new_articles = []
+
+    for entry in reversed(entries):  # oldest first
         link = entry.get("link")
-        desc = entry.get("description", "")
+        title = entry.get("title", "Untitled")
         if link and link not in posted_urls:
-            new_entries.append((link, desc))
-    
-    if not new_entries:
-        print("No new articles to push to Medium.")
+            new_articles.append((title, link))
+
+    if not new_articles:
+        print("No new articles found. Nothing to notify.")
         return
-    
-    print(f"Found {len(new_entries)} new article(s) to push.\n")
-    
-    # Step 4: Push each article
-    success_count = 0
-    for url, desc in new_entries:
-        print(f"Processing: {url}")
-        if push_to_medium(user_id, url, desc):
-            append_posted_url(url)
-            success_count += 1
-            print()
-        else:
-            print(f"\nStopping due to failure on {url}.")
-            sys.exit(1)
-    
-    print(f"\nDone! Successfully pushed {success_count} article(s) to Medium as drafts.")
+
+    print(f"Found {len(new_articles)} new article(s). Sending notifications...\n")
+
+    # Step 3: Send WhatsApp notification for each new article
+    for title, url in new_articles:
+        print(f"→ {title}")
+
+        message = (
+            f"📝 *New Article Ready for Medium*\n"
+            f"\n"
+            f"*{title}*\n"
+            f"\n"
+            f"🔗 Original: {url}\n"
+            f"\n"
+            f"👉 Import here: https://medium.com/p/import\n"
+            f"Paste the URL above into Medium's import page."
+        )
+
+        send_whatsapp(message)
+        append_posted_url(url)
+        print()
+
+    print(f"Done! Notified {len(new_articles)} article(s).")
 
 if __name__ == "__main__":
     main()

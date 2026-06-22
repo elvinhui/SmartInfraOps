@@ -27,7 +27,8 @@ jobs:
       - name: Run Pusher Engine
         env:
           RSS_URL: 'https://smartinfralog.com/index.xml'
-          MEDIUM_TOKEN: ${{ secrets.MEDIUM_TOKEN }}
+          WHATSAPP_PHONE_NUMBER: ${{ secrets.WHATSAPP_PHONE_NUMBER }}
+          WHATSAPP_API_KEY: ${{ secrets.WHATSAPP_API_KEY }}
         run: python module_pusher/main.py
 
       - name: Commit posted URLs
@@ -36,7 +37,6 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git add module_pusher/posted_urls.txt
           
-          # Only commit if there are changes
           if ! git diff-index --quiet HEAD; then
             git commit -m "chore(pusher): update posted URLs [skip ci]"
             git push
