@@ -1,6 +1,5 @@
 import os
 import sys
-import feedparser
 from playwright.sync_api import sync_playwright
 
 RSS_URL = os.getenv("RSS_URL", "https://smartinfralog.com/index.xml")
@@ -63,26 +62,39 @@ def push_to_medium(url):
         finally:
             browser.close()
 
+import urllib.request
+import json
+
 def main():
-    print(f"Fetching RSS feed from {RSS_URL}...")
-    # Use a standard browser User-Agent to prevent 403 Forbidden from bot protection (e.g. Cloudflare)
-    feedparser.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    feed = feedparser.parse(RSS_URL)
+    print(f"Fetching RSS feed from {RSS_URL} via rss2json...")
+    api_url = f"https://api.rss2json.com/v1/api.json?rss_url={RSS_URL}"
+    req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
     
-    if feed.bozo and len(feed.entries) == 0:
-        print(f"Warning: RSS feed could not be fully parsed and contains no entries. Error: {feed.get('bozo_exception', 'Unknown')}")
+    try:
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read())
+    except Exception as e:
+        print(f"Error fetching from rss2json: {e}")
+        sys.exit(1)
+        
+    if data.get('status') != 'ok':
+        print(f"Warning: rss2json returned an error: {data.get('message', 'Unknown')}")
+        sys.exit(1)
+        
+    entries = data.get('items', [])
+    if len(entries) == 0:
+        print("Warning: Feed contains no entries.")
         sys.exit(1)
         
     posted_urls = load_posted_urls()
     new_entries = []
     
-    # Process from oldest to newest if you prefer, but usually iterating feed.entries is fine
-    # feed.entries is usually newest first. We reverse to push oldest first
-    for entry in reversed(feed.entries):
-        if hasattr(entry, 'link'):
-            link = entry.link
-            if link not in posted_urls:
-                new_entries.append(link)
+    # Process from oldest to newest if you prefer, but usually iterating entries is fine
+    # entries is usually newest first. We reverse to push oldest first
+    for entry in reversed(entries):
+        link = entry.get('link')
+        if link and link not in posted_urls:
+            new_entries.append(link)
 
     if not new_entries:
         print("No new articles to push to Medium.")
