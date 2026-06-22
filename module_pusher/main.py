@@ -87,12 +87,22 @@ def push_to_medium(url):
         import_btn.click()
         
         try:
-            wait.until(EC.visibility_of_element_located((By.XPATH, "//button[contains(text(), 'Publish')]")))
-        except Exception:
-            print("Could not find Publish button, but import may have succeeded.")
+            # Check for "Import failed" text first
+            time.sleep(2)
+            if "Import failed" in driver.page_source:
+                print(f"Failed to push {url} to Medium: Medium server could not fetch the blog post.")
+                driver.save_screenshot("debug_medium_uc.png")
+                return False
 
-        print(f"Successfully imported {url} to Medium (Saved as Draft).")
-        return True
+            publish_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Publish')]")))
+            print(f"Successfully imported {url} to Medium (Saved as Draft).")
+            return True
+        except:
+            if "Import failed" in driver.page_source:
+                print(f"Failed to push {url} to Medium: Medium server could not fetch the blog post.")
+                return False
+            print("Could not find Publish button, but import may have succeeded.")
+            return True
     except Exception as e:
         print(f"Failed to push {url} to Medium: {e}")
         try:
