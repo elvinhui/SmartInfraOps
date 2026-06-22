@@ -19,4 +19,5 @@ jobs:
         env:
           MEDIUM_SID: ${{ secrets.MEDIUM_SID }}
           MEDIUM_UID: ${{ secrets.MEDIUM_UID }}
+          MEDIUM_XSRF: ${{ secrets.MEDIUM_XSRF }}
         run: python module_pusher/probe_medium.py
