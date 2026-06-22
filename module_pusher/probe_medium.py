@@ -1,6 +1,6 @@
 """
-Medium API Probe v2 - Targeted test with full cookie auth + CSRF token.
-The /_/api/ endpoints bypass Cloudflare. Now we test proper auth.
+Medium API Probe v3 - Auth verification + post creation endpoints.
+Focus on finding auth-required endpoints and the correct import/publish pattern.
 """
 import os
 import sys
@@ -13,7 +13,6 @@ MEDIUM_UID = os.getenv("MEDIUM_UID", "")
 MEDIUM_XSRF = os.getenv("MEDIUM_XSRF", "")
 
 def try_request(label, url, method="GET", headers=None, cookie_str=None, data=None):
-    """Try a request and log the result."""
     print(f"\n{'='*60}")
     print(f"TEST: {label}")
     print(f"URL:  {url} [{method}]")
@@ -26,9 +25,12 @@ def try_request(label, url, method="GET", headers=None, cookie_str=None, data=No
         h["Cookie"] = cookie_str
     
     body = None
-    if data:
-        body = json.dumps(data).encode("utf-8")
-        h["Content-Type"] = "application/json"
+    if data is not None:
+        if isinstance(data, str):
+            body = data.encode("utf-8")
+        else:
+            body = json.dumps(data).encode("utf-8")
+            h["Content-Type"] = "application/json"
     
     req = urllib.request.Request(url, data=body, headers=h, method=method)
     
@@ -36,16 +38,22 @@ def try_request(label, url, method="GET", headers=None, cookie_str=None, data=No
         with urllib.request.urlopen(req, timeout=15) as resp:
             code = resp.getcode()
             raw = resp.read().decode("utf-8", errors="replace")
-            print(f"✅ Status: {code}")
-            # Strip Medium's XSS protection prefix
             clean = raw.replace("])}while(1);</x>", "")
-            print(f"Response:\n{clean[:800]}")
+            print(f"✅ Status: {code}")
+            # Check if it's a Cloudflare challenge
+            if "Just a moment" in clean:
+                print("⚠️  Cloudflare challenge page!")
+            else:
+                print(f"Response:\n{clean[:1000]}")
             return code, clean
     except urllib.error.HTTPError as e:
         raw = e.read().decode("utf-8", errors="replace")
         clean = raw.replace("])}while(1);</x>", "")
         print(f"❌ HTTP Error: {e.code}")
-        print(f"Response:\n{clean[:800]}")
+        if "Just a moment" in clean:
+            print("⚠️  Cloudflare challenge page!")
+        else:
+            print(f"Response:\n{clean[:1000]}")
         return e.code, clean
     except Exception as e:
         print(f"❌ Exception: {e}")
@@ -57,84 +65,105 @@ def main():
         sys.exit(1)
     
     print("=" * 60)
-    print("MEDIUM API PROBE v2 — Full Auth + CSRF")
+    print("MEDIUM API PROBE v3 — Auth + Post Creation")
     print("=" * 60)
     
-    # Full cookie string
     cookies = f"sid={MEDIUM_SID}; uid={MEDIUM_UID}"
     if MEDIUM_XSRF:
         cookies += f"; xsrf={MEDIUM_XSRF}"
     
-    # Headers with CSRF token
-    auth_headers = {}
+    base_headers = {}
     if MEDIUM_XSRF:
-        auth_headers["x-xsrf-token"] = MEDIUM_XSRF
+        base_headers["x-xsrf-token"] = MEDIUM_XSRF
     
-    print(f"\nCookies set: sid=***, uid={MEDIUM_UID}, xsrf={'set' if MEDIUM_XSRF else 'NOT SET'}")
+    # ===== PART A: Auth verification =====
+    print("\n\n>>> PART A: Auth Verification <<<")
     
-    # --- Test 1: /_/api/me (common internal endpoint) ---
+    # Test 1: /me/settings?format=json (MUST be logged in)
     try_request(
-        "Internal API: /_/api/me",
-        "https://medium.com/_/api/me",
-        headers=dict(auth_headers),
+        "Auth check: /me/settings?format=json",
+        "https://medium.com/me/settings?format=json",
+        headers=dict(base_headers),
         cookie_str=cookies
     )
     
-    # --- Test 2: /_/api/users/{uid} ---
+    # Test 2: /me/stats?format=json (MUST be logged in)
     try_request(
-        f"Internal API: /_/api/users/{MEDIUM_UID}",
-        f"https://medium.com/_/api/users/{MEDIUM_UID}",
-        headers=dict(auth_headers),
+        "Auth check: /me/stats?format=json",
+        "https://medium.com/me/stats?format=json",
+        headers=dict(base_headers),
         cookie_str=cookies
     )
     
-    # --- Test 3: /@me endpoint ---
+    # Test 3: /me/notifications?format=json (MUST be logged in)
     try_request(
-        "Internal API: /@me",
-        "https://medium.com/@me?format=json",
-        headers=dict(auth_headers),
+        "Auth check: /me/notifications?format=json",
+        "https://medium.com/me/notifications?format=json",
+        headers=dict(base_headers),
         cookie_str=cookies
     )
     
-    # --- Test 4: Import story endpoint (GET to discover) ---
+    # Test 4: /_/api/users/lo_xxx/profile (explicit UID path)
     try_request(
-        "Import endpoint: /_/api/posts/import (GET probe)",
-        "https://medium.com/_/api/posts/import",
-        headers=dict(auth_headers),
+        "Auth check: /_/api/users/<uid>/profile",
+        f"https://medium.com/_/api/users/{MEDIUM_UID}/profile",
+        headers=dict(base_headers),
         cookie_str=cookies
     )
     
-    # --- Test 5: Try POST to import with a test URL ---
-    test_url = "https://www.smartinfralog.com/posts/post-1781921757/"
+    # ===== PART B: Post creation endpoints =====
+    print("\n\n>>> PART B: Post Creation Endpoints <<<")
+    
+    test_content = {
+        "title": "Test Post",
+        "content": "<p>Test content</p>",
+        "contentFormat": "html",
+        "canonicalUrl": "https://www.smartinfralog.com/posts/post-1781921757/",
+        "publishStatus": "draft"
+    }
+    
+    # Test 5: POST /_/api/posts (internal create)
     try_request(
-        "Import endpoint: POST /_/api/posts/import",
-        "https://medium.com/_/api/posts/import",
+        "Create post: POST /_/api/posts",
+        "https://medium.com/_/api/posts",
         method="POST",
-        headers=dict(auth_headers),
+        headers=dict(base_headers),
         cookie_str=cookies,
-        data={"url": test_url}
+        data=test_content
     )
     
-    # --- Test 6: Try another import pattern ---
+    # Test 6: POST /_/api/users/<uid>/posts
     try_request(
-        "Import endpoint: POST /p/import with JSON",
+        "Create post: POST /_/api/users/<uid>/posts",
+        f"https://medium.com/_/api/users/{MEDIUM_UID}/posts",
+        method="POST",
+        headers=dict(base_headers),
+        cookie_str=cookies,
+        data=test_content
+    )
+    
+    # Test 7: Try form-style import (like the import page does)
+    form_data = urllib.parse.urlencode({"url": "https://www.smartinfralog.com/posts/post-1781921757/"})
+    import urllib.parse
+    try_request(
+        "Import: POST /p/import (form data)",
         "https://medium.com/p/import",
         method="POST",
-        headers=dict(auth_headers),
+        headers={**base_headers, "Content-Type": "application/x-www-form-urlencoded"},
         cookie_str=cookies,
-        data={"url": test_url}
+        data=form_data
     )
+
+    # ===== PART C: Without cookies (control) =====
+    print("\n\n>>> PART C: Control (no cookies) <<<")
     
-    # --- Test 7: Medium API v1 with cookie (control test) ---
     try_request(
-        "Control: api.medium.com/v1/me with cookies + xsrf",
-        "https://api.medium.com/v1/me",
-        headers=dict(auth_headers),
-        cookie_str=cookies
+        "Control: /me/settings without cookies",
+        "https://medium.com/me/settings?format=json",
     )
     
     print("\n" + "=" * 60)
-    print("PROBE v2 COMPLETE — Send these results back!")
+    print("PROBE v3 COMPLETE")
     print("=" * 60)
 
 if __name__ == "__main__":
