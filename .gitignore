@@ -1,0 +1,27 @@
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Editor and OS
+.vscode/
+.idea/
+.DS_Store
+
+# Logs and debug output
+pusher_log.txt
+debug_*
+temp_*
+
+# Credentials and secrets
+medium_auth.json
+.env
+
+# Others
+posted_urls.txt
