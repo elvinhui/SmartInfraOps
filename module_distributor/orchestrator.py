@@ -49,7 +49,7 @@ def fetch_article_text(url):
 
 def generate_social_variants(title, url, text):
     """
-    Uses OpenRouter (Claude-3.5-Sonnet) to generate variants.
+    Uses OpenRouter (GPT-4o-mini) to generate variants.
     """
     if not OPENROUTER_API_KEY:
         print("OPENROUTER_API_KEY not set. Using fallback dummy text.")
@@ -76,7 +76,7 @@ Do not wrap the JSON in markdown code blocks, just output the raw JSON."""
 
     try:
         response = client.chat.completions.create(
-            model="anthropic/claude-3.5-sonnet",
+            model="openai/gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
