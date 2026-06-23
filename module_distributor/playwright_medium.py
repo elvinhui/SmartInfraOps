@@ -52,8 +52,9 @@ def push_to_medium(url, title, content_html=None):
             
             # Type title
             print(f"Typing title: {title}")
-            page.wait_for_selector("h3.graf--title", timeout=30000)
-            page.click("h3.graf--title")
+            title_locator = page.locator('h3.graf--title, [data-placeholder="Title"], h1').first
+            title_locator.wait_for(state="visible", timeout=30000)
+            title_locator.click()
             page.keyboard.type(title)
             time.sleep(1)
             
