@@ -55,26 +55,46 @@ def push_to_medium(url, title, content_html=None):
             safe_html = content_html.replace('`', '\\`').replace('${', '\\${')
             page.evaluate(f"document.execCommand('insertHTML', false, `{safe_html}`)")
             
+            # TRIGGER REACT AUTOSAVE (simulate typing to force Medium to recognize content change)
+            page.keyboard.type(" ")
+            time.sleep(1)
+            page.keyboard.press("Backspace")
+            
             # Wait for medium to process pasted content and auto-save
             time.sleep(10)
 
             # --- SEO Canonical 强绑定 (Kill-Switch) ---
             print("Enforcing SEO Canonical Link...")
             try:
-                # 1. Click the three-dot menu (More options)
-                menu_btn = page.locator('button[aria-controls="more-menu"], button[aria-label*="options" i], button[aria-label*="More" i]').first
-                if not menu_btn.is_visible(timeout=5000):
-                    menu_btn = page.locator('button:has(svg)').last # Usually the last button in the top bar is the 3 dots or profile
-                menu_btn.click(timeout=10000)
+                # 1. Bruteforce click buttons to find the "Settings" menu
+                found_settings = False
+                buttons = page.locator('nav button, header button').all()
+                if not buttons:
+                    buttons = page.locator('button').all()
+                
+                for btn in reversed(buttons):
+                    try:
+                        if "publish" in btn.inner_text().lower(): 
+                            continue
+                        btn.click(timeout=2000)
+                        time.sleep(1.5)
+                        if page.locator('button, a').filter(has_text=re.compile(r"settings", re.IGNORECASE)).first.is_visible():
+                            found_settings = True
+                            break
+                    except Exception as loop_e:
+                        pass
+                        
+                if not found_settings:
+                    raise Exception("Bruteforce failed to find the More Options menu.")
                 
                 # 2. Click "Story settings" or "More settings"
-                page.locator('button, a').filter(has_text=re.compile(r"settings", re.IGNORECASE)).click(timeout=10000)
+                page.locator('button, a').filter(has_text=re.compile(r"settings", re.IGNORECASE)).first.click(timeout=10000)
                 
                 # We are now on the settings page.
                 page.wait_for_load_state("domcontentloaded")
+                time.sleep(2)
                 
                 # 3. Target Advanced Settings
-                # Locate the advanced settings section by scrolling or directly locating
                 advanced_settings = page.locator('h2').filter(has_text="Advanced Settings")
                 if advanced_settings.is_visible():
                     advanced_settings.scroll_into_view_if_needed()
@@ -94,14 +114,12 @@ def push_to_medium(url, title, content_html=None):
                 print("Canonical link successfully bound.")
                 
             except Exception as e:
-                print(f"Warning: Failed to enforce canonical link: {e}")
-                print("Skipping SEO Canonical binding due to Medium UI changes. Article is still saved as Draft.")
-                # Save screenshot for debugging
+                print(f"Fatal Error during Canonical binding: {e}")
                 try:
                     page.screenshot(path="fatal_canonical_error.png")
                 except:
                     pass
-                # We intentionally do NOT raise FatalError here so the distribution process can complete successfully.
+                raise FatalError("SEO Kill-Switch triggered: Failed to enforce canonical link.")
 
             print(f"Successfully pushed {url} to Medium (Saved as Draft).")
             return True
