@@ -33,21 +33,9 @@ def push_to_medium(url, title, content_html=None):
             page.wait_for_selector(".ops-article-content", timeout=30000)
             time.sleep(2) # Let images fully render
 
-            print("Copying article content to clipboard...")
-            # Use JS to select the content
-            page.evaluate("""
-                const range = document.createRange();
-                range.selectNodeContents(document.querySelector('.ops-article-content'));
-                const sel = window.getSelection();
-                sel.removeAllRanges();
-                sel.addRange(range);
-            """)
-            time.sleep(1)
+            print("Extracting article HTML...")
+            content_html = page.evaluate("document.querySelector('.ops-article-content').innerHTML")
             
-            # Use keyboard to copy
-            page.keyboard.press("Control+C")
-            time.sleep(1)
-
             print("Navigating to Medium new story editor...")
             page.goto("https://medium.com/new-story", wait_until="domcontentloaded", timeout=60000)
             
@@ -62,11 +50,13 @@ def push_to_medium(url, title, content_html=None):
             # Move to body and paste
             page.keyboard.press("Enter")
             time.sleep(1)
-            print("Pasting content...")
-            page.keyboard.press("Control+V")
+            print("Pasting content via JS...")
+            # Use backticks for JS string, escaping backticks and ${ inside the HTML
+            safe_html = content_html.replace('`', '\\`').replace('${', '\\${')
+            page.evaluate(f"document.execCommand('insertHTML', false, `{safe_html}`)")
             
             # Wait for medium to process pasted content and auto-save
-            time.sleep(8)
+            time.sleep(10)
 
             # --- SEO Canonical 强绑定 (Kill-Switch) ---
             print("Enforcing SEO Canonical Link...")
