@@ -26,7 +26,7 @@ def push_to_medium(url, title, content_html=None):
 
         try:
             print(f"Navigating to original article: {url}...")
-            page.goto(url, wait_until="networkidle", timeout=60000)
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
             
             # Wait for content to load
             page.wait_for_selector(".ops-article-content", timeout=30000)
@@ -48,7 +48,7 @@ def push_to_medium(url, title, content_html=None):
             time.sleep(1)
 
             print("Navigating to Medium new story editor...")
-            page.goto("https://medium.com/new-story", wait_until="networkidle", timeout=60000)
+            page.goto("https://medium.com/new-story", wait_until="domcontentloaded", timeout=60000)
             
             # Type title
             print(f"Typing title: {title}")
@@ -82,7 +82,7 @@ def push_to_medium(url, title, content_html=None):
                 page.locator('button, a').filter(has_text="More settings").click(timeout=10000)
                 
                 # We are now on the settings page.
-                page.wait_for_load_state("networkidle")
+                page.wait_for_load_state("domcontentloaded")
                 
                 # 3. Target Advanced Settings
                 # Locate the advanced settings section by scrolling or directly locating
