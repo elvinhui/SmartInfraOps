@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import re
 from playwright.sync_api import sync_playwright
 
 class FatalError(Exception):
@@ -71,16 +72,13 @@ def push_to_medium(url, title, content_html=None):
             print("Enforcing SEO Canonical Link...")
             try:
                 # 1. Click the three-dot menu (More options)
-                # Playwright locates by aria-label or title usually. 
-                # Medium's three dot menu has aria-label "More options" or similar.
-                # Let's try multiple common selectors for it.
-                menu_btn = page.locator('button[aria-label="More story options"], button[title="More options"], button:has(svg[aria-label="More options"])').first
+                menu_btn = page.locator('button[aria-controls="more-menu"], button[aria-label*="options" i], button[aria-label*="More" i]').first
                 if not menu_btn.is_visible(timeout=5000):
-                    menu_btn = page.locator('button:has(svg)').filter(has_text="").nth(2) # Fallback heuristic
+                    menu_btn = page.locator('button:has(svg)').last # Usually the last button in the top bar is the 3 dots or profile
                 menu_btn.click(timeout=10000)
                 
-                # 2. Click "More settings"
-                page.locator('button, a').filter(has_text="More settings").click(timeout=10000)
+                # 2. Click "Story settings" or "More settings"
+                page.locator('button, a').filter(has_text=re.compile(r"settings", re.IGNORECASE)).click(timeout=10000)
                 
                 # We are now on the settings page.
                 page.wait_for_load_state("domcontentloaded")
