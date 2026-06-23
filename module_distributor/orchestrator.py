@@ -19,7 +19,7 @@ def load_posted_urls():
     if not os.path.exists(POSTED_URLS_FILE):
         return set()
     with open(POSTED_URLS_FILE, "r") as f:
-        return set(line.strip() for line in f if line.strip() and not line.startswith("#"))
+        return set(line.strip().rstrip('/') for line in f if line.strip() and not line.startswith("#"))
 
 def append_posted_url(url):
     with open(POSTED_URLS_FILE, "a") as f:
@@ -121,10 +121,10 @@ def main():
     for entry in reversed(entries):
         link = entry.get('link')
         title = entry.get('title')
-        if link and link not in posted_urls:
-            # Strip trailing slash to avoid Vercel 308 redirect issues that plagued earlier versions
+        if link:
             clean_link = link.rstrip('/')
-            new_entries.append((clean_link, title))
+            if clean_link not in posted_urls:
+                new_entries.append((clean_link, title))
 
     if not new_entries:
         print("No new articles to distribute.")
