@@ -125,6 +125,10 @@ def get_umami_token():
         return response.json().get("token")
     except Exception as e:
         print(f"Failed to authenticate with Umami: {e}")
+        if 'response' in locals() and hasattr(response, 'text'):
+            print(f"Status Code: {response.status_code}")
+            print(f"Response Body: {response.text[:1000]}")
+        print(f"Attempted URL: {url}")
         send_whatsapp_alert("🚨 SmartInfra-Ops 警告：基础设施统计服务异常，Umami 控制面板无法访问。")
         sys.exit(1)
 
