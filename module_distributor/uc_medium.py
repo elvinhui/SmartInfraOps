@@ -137,24 +137,25 @@ def push_to_medium(url, title, content_html):
         # 9. Click final Publish button in the modal
         print("Clicking final Publish button...")
         driver.execute_script("""
-            var btns = document.querySelectorAll('button');
-            var publishBtns = [];
-            for(var i=0; i<btns.length; i++){
-                var text = (btns[i].innerText || '').toLowerCase().trim();
-                if(text === 'publish' || text === 'publish now') {
-                    publishBtns.push(btns[i]);
+            var btns = Array.from(document.querySelectorAll('button'));
+            var publishNowBtn = btns.find(b => b.innerText && b.innerText.toLowerCase().includes('publish now'));
+            if (publishNowBtn) {
+                publishNowBtn.click();
+            } else {
+                var publishBtns = btns.filter(b => b.innerText && b.innerText.toLowerCase().trim() === 'publish');
+                if (publishBtns.length > 1) {
+                    publishBtns[publishBtns.length - 1].click();
+                } else if (publishBtns.length === 1) {
+                    publishBtns[0].click();
                 }
-            }
-            if(publishBtns.length > 1) {
-                // Usually the modal button is the last one in DOM
-                publishBtns[publishBtns.length - 1].click();
-            } else if (publishBtns.length === 1) {
-                publishBtns[0].click();
             }
         """)
         
         print("Waiting for story to be published...")
-        time.sleep(15) # Wait for publish to finish and redirect to live URL
+        for _ in range(30):
+            if "new-story" not in driver.current_url:
+                break
+            time.sleep(1)
         
         # --- SEO Canonical 强绑定 (Kill-Switch) ---
         print("Enforcing SEO Canonical Link after publishing...")

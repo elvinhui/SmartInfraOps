@@ -90,11 +90,12 @@ def polish_article_with_claude(html_content):
     try:
         import markdown
         response = client.chat.completions.create(
-            model="anthropic/claude-3.5-sonnet",
+            model="anthropic/claude-3-haiku",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": html_content}
             ],
+            temperature=0.3
         )
         md_content = response.choices[0].message.content
         html_output = markdown.markdown(md_content, extensions=['fenced_code', 'tables'])
