@@ -210,7 +210,8 @@ def main():
     if not top_urls:
         top_pages_lines.append("No page views recorded.")
 
-    top_pages_str = "\n".join(top_pages_lines)
+    # WhatsApp template parameters cannot contain newlines or tabs
+    top_pages_str = " | ".join(top_pages_lines)
 
     print("Sending WhatsApp report...")
     send_whatsapp_template_message(date_str, pv, uv, bounces, top_pages_str)
