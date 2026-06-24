@@ -37,6 +37,16 @@ jobs:
             echo "Warning: MEDIUM_AUTH_JSON_BASE64 secret is not set."
           fi
 
+      - name: Decode Twitter Auth JSON
+        env:
+          TWITTER_AUTH_JSON_BASE64: ${{ secrets.TWITTER_AUTH_JSON_BASE64 }}
+        run: |
+          if [ -n "$TWITTER_AUTH_JSON_BASE64" ]; then
+            echo "$TWITTER_AUTH_JSON_BASE64" | base64 --decode > module_distributor/twitter_auth.json
+          else
+            echo "Warning: TWITTER_AUTH_JSON_BASE64 secret is not set."
+          fi
+
       - name: Run Orchestrator
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

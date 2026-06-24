@@ -2,3 +2,6 @@ playwright>=1.44.0
 openai>=1.30.0
 tweepy>=4.14.0
 requests>=2.32.3
+undetected-chromedriver>=3.5.0
+selenium>=4.0.0
+beautifulsoup4>=4.12.0

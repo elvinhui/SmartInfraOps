@@ -24,3 +24,10 @@ medium_auth.json
 .env
 
 # Others
+*.png
+*_dump.txt
+*dump.txt
+*auth.json
+*auth_*.json
+apollo.json
+test_*.py
