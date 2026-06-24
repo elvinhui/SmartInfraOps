@@ -86,7 +86,7 @@ def send_whatsapp_template_message(date_str, pv, uv, bounces, top_pages_str):
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=15)
             
-            if response.status_code == 400 and "Template name does not exist" in response.text:
+            if response.status_code in [400, 404] and "Template name does not exist" in response.text:
                 print("Warning: Template not found. Falling back to plain text message.")
                 fallback_text = (
                     f"📊 *SmartInfra-Ops Daily Report*\n"
