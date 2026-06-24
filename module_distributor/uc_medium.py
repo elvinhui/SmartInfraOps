@@ -120,19 +120,25 @@ def push_to_medium(url, title, content_html):
         time.sleep(8) # wait for medium to auto-save and process images
         
         # 8. Click Publish button to see the modal
-        print("Clicking Publish...")
-        publish_btn = driver.execute_script("""
-            var btns = document.querySelectorAll('button');
-            for(var i=0; i<btns.length; i++){
-                var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
-                if(txt === 'publish') {
-                    btns[i].click();
-                    return true;
+        print("Waiting for Publish button to be enabled and clicking...")
+        for _ in range(15):
+            success = driver.execute_script("""
+                var btns = document.querySelectorAll('button');
+                for(var i=0; i<btns.length; i++){
+                    var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
+                    if(txt === 'publish' && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled')) {
+                        btns[i].click();
+                        return true;
+                    }
                 }
-            }
-            return false;
-        """)
-        time.sleep(3)
+                return false;
+            """)
+            if success:
+                break
+            time.sleep(2)
+        
+        print("Waiting for modal to render...")
+        time.sleep(5)
         driver.save_screenshot('publish_modal_debug.png')
         
         # 9. Click final Publish button in the modal
