@@ -207,11 +207,12 @@ def push_to_medium(url, title, content_html):
             # 2. Find and click Advanced Settings to expand it
             print("Clicking Advanced Settings headers to expand...")
             driver.execute_script("""
-                var elements = document.querySelectorAll('button, h1, h2, h3, h4, h5, h6, span, div, p');
+                var elements = document.querySelectorAll('button, summary');
                 for (var i=0; i<elements.length; i++) {
                     var txt = elements[i].innerText || elements[i].textContent || '';
                     if (txt.toLowerCase().includes('advanced settings')) {
                         try { elements[i].click(); } catch(e) {}
+                        break;
                     }
                 }
             """)
@@ -241,7 +242,7 @@ def push_to_medium(url, title, content_html):
                 var label = null;
                 for (var i=0; i<labels.length; i++) {{
                     var txt = labels[i].innerText || labels[i].textContent || '';
-                    if (txt.toLowerCase().includes('originally published') && labels[i].getBoundingClientRect().height > 0) {{
+                    if (txt.toLowerCase().includes('originally published')) {{
                         // To avoid grabbing a giant container, make sure the text isn't too long
                         if (txt.length < 100) {{
                             label = labels[i];
@@ -252,10 +253,14 @@ def push_to_medium(url, title, content_html):
                 
                 if (!label) return false;
                 
-                label.scrollIntoView({{behavior: "smooth", block: "center"}});
+                try {{ label.scrollIntoView({{behavior: "smooth", block: "center"}}); }} catch(e) {{}}
                 
                 // 2. Click the label
                 label.click();
+                
+                // Backup: if it has an input child, click that too
+                var cb = label.querySelector('input[type="checkbox"]');
+                if (cb) cb.click();
                 
                 return true;
             """)
