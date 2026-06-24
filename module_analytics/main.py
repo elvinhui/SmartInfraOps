@@ -63,7 +63,7 @@ def send_whatsapp_template_message(date_str, pv, uv, bounces, top_pages_str):
         "template": {
             "name": WA_TEMPLATE_NAME,
             "language": {
-                "code": "zh_CN" # Adjust to match your approved template language
+                "code": "en" # Changed to English as per the Meta dashboard
             },
             "components": [
                 {
