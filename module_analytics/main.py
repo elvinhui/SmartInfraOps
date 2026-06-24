@@ -154,7 +154,7 @@ def fetch_umami_metrics(token, start_ts, end_ts):
     params = {
         "startAt": start_ts,
         "endAt": end_ts,
-        "type": "url"
+        "type": "path"
     }
     try:
         response = requests.get(url, headers=headers, params=params, timeout=10)
