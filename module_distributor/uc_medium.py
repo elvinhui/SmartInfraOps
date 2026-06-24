@@ -124,7 +124,8 @@ def push_to_medium(url, title, content_html):
         publish_btn = driver.execute_script("""
             var btns = document.querySelectorAll('button');
             for(var i=0; i<btns.length; i++){
-                if((btns[i].innerText || '').toLowerCase().trim() === 'publish') {
+                var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
+                if(txt === 'publish') {
                     btns[i].click();
                     return true;
                 }
@@ -138,11 +139,17 @@ def push_to_medium(url, title, content_html):
         print("Clicking final Publish button...")
         driver.execute_script("""
             var btns = Array.from(document.querySelectorAll('button'));
-            var publishNowBtn = btns.find(b => b.innerText && b.innerText.toLowerCase().includes('publish now'));
+            var publishNowBtn = btns.find(b => {
+                var txt = (b.innerText || b.textContent || '').toLowerCase().trim();
+                return txt.includes('publish now');
+            });
             if (publishNowBtn) {
                 publishNowBtn.click();
             } else {
-                var publishBtns = btns.filter(b => b.innerText && b.innerText.toLowerCase().trim() === 'publish');
+                var publishBtns = btns.filter(b => {
+                    var txt = (b.innerText || b.textContent || '').toLowerCase().trim();
+                    return txt === 'publish';
+                });
                 if (publishBtns.length > 1) {
                     publishBtns[publishBtns.length - 1].click();
                 } else if (publishBtns.length === 1) {
