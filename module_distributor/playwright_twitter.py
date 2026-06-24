@@ -53,7 +53,7 @@ def post_tweet(text):
             print("Clicking tweet button...")
             tweet_button = page.locator('[data-testid="tweetButton"]').last
             tweet_button.wait_for(state="visible", timeout=10000)
-            tweet_button.click()
+            tweet_button.click(force=True)
             
             # Wait for tweet to be sent
             time.sleep(5)

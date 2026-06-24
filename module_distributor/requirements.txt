@@ -5,3 +5,4 @@ requests>=2.32.3
 undetected-chromedriver>=3.5.0
 selenium>=4.0.0
 beautifulsoup4>=4.12.0
+markdown
