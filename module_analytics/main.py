@@ -189,9 +189,14 @@ def main():
     stats = fetch_umami_stats(token, start_ts, end_ts)
     metrics = fetch_umami_metrics(token, start_ts, end_ts)
 
-    pv = stats.get('pageviews', {}).get('value', 0)
-    uv = stats.get('visitors', {}).get('value', 0)
-    bounces = stats.get('bounces', {}).get('value', 0)
+    pv_data = stats.get('pageviews', 0)
+    pv = pv_data.get('value', 0) if isinstance(pv_data, dict) else pv_data
+
+    uv_data = stats.get('visitors', 0)
+    uv = uv_data.get('value', 0) if isinstance(uv_data, dict) else uv_data
+
+    bounces_data = stats.get('bounces', 0)
+    bounces = bounces_data.get('value', 0) if isinstance(bounces_data, dict) else bounces_data
     
     # Sort metrics by views and get top 3
     top_urls = sorted(metrics, key=lambda i: i.get('y', 0), reverse=True)[:3]
