@@ -93,9 +93,18 @@ def push_to_medium(url, title, content_html):
 
         # 5. Type title
         print(f"Typing title: {title}")
-        title_element = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "h3.graf--title, [data-placeholder='Title'], h1")))
-        title_element.click()
-        title_element.send_keys(title)
+        title_element = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "h3.graf--title, [data-placeholder='Title'], h1")))
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", title_element)
+        time.sleep(1)
+        try:
+            title_element.click()
+        except:
+            driver.execute_script("arguments[0].click();", title_element)
+        
+        # sometimes send_keys fails if element isn't strictly an input, ActionChains is safer
+        actions = ActionChains(driver)
+        actions.send_keys(title)
+        actions.perform()
         time.sleep(1)
 
         # 6. Press Enter to go to body
