@@ -106,7 +106,7 @@ def push_to_medium(url, title, content_html):
         # 5. Type title
         print(f"Typing title: {title}")
         try:
-            title_element = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "h3.graf--title, [data-placeholder='Title'], [aria-placeholder='Title'], h1, [role='textbox']")))
+            title_element = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[contenteditable='true'], h3.graf--title, [data-placeholder='Title'], [aria-placeholder='Title'], h1, [role='textbox']")))
         except Exception as e:
             print(f"Failed to find title element. Current URL: {driver.current_url}")
             driver.save_screenshot('error_title_timeout.png')
