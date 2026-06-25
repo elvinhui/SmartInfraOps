@@ -71,10 +71,9 @@ def post_tweet(text, url):
 
     options = uc.ChromeOptions()
     options.add_argument('--proxy-server=http://127.0.0.1:8080')
-    is_ci = os.getenv("CI", "false").lower() == "true"
     
     print("Starting undetected-chromedriver for X...")
-    driver = uc.Chrome(options=options, version_main=149, headless=is_ci)
+    driver = uc.Chrome(options=options, version_main=149, headless=False)
     wait = WebDriverWait(driver, 30)
 
     try:

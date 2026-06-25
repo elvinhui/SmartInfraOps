@@ -73,8 +73,10 @@ jobs:
           LINKEDIN_TOKEN: ${{ secrets.LINKEDIN_TOKEN }}
           LINKEDIN_PERSON_URN: ${{ secrets.LINKEDIN_PERSON_URN }}
         run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
           cd module_distributor
-          python orchestrator.py
+          xvfb-run --auto-servernum python orchestrator.py
 
       - name: Commit posted URLs
         run: |
