@@ -101,10 +101,8 @@ def push_to_medium(url, title, content_html):
         except:
             driver.execute_script("arguments[0].click();", title_element)
         
-        # sometimes send_keys fails if element isn't strictly an input, ActionChains is safer
-        actions = ActionChains(driver)
-        actions.send_keys(title)
-        actions.perform()
+        # Use execCommand to insert text robustly
+        driver.execute_script("document.execCommand('insertText', false, arguments[0]);", title)
         time.sleep(1)
 
         # 6. Press Enter to go to body
@@ -113,8 +111,12 @@ def push_to_medium(url, title, content_html):
         actions.perform()
         time.sleep(1)
 
-        # 7. Paste content
+        # 7. Paste content via JS/clipboard or ActionChains
         print("Pasting content...")
+        # Since we copied the HTML content via OS clipboard (Ctrl+C) earlier, 
+        # we must use Ctrl+V. But to ensure focus, we click the active element first.
+        driver.execute_script("document.activeElement.click();")
+        time.sleep(0.5)
         actions = ActionChains(driver)
         actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
         time.sleep(8) # wait for medium to auto-save and process images
@@ -169,6 +171,9 @@ def push_to_medium(url, title, content_html):
             if "new-story" not in driver.current_url:
                 break
             time.sleep(1)
+            
+        if "new-story" in driver.current_url:
+            raise Exception("Medium failed to auto-save or publish. URL did not change from new-story. Possible rate limit or page load failure.")
         
         # --- SEO Canonical 强绑定 (Kill-Switch) ---
         print("Enforcing SEO Canonical Link after publishing...")
