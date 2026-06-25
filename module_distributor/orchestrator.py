@@ -152,24 +152,28 @@ Do not wrap the JSON in markdown code blocks, just output the raw JSON."""
         }
 
 def main():
-    print(f"Fetching RSS feed from {RSS_URL} via rss2json...")
-    api_url = f"https://api.rss2json.com/v1/api.json?rss_url={RSS_URL}"
-    req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
+    import xml.etree.ElementTree as ET
+    print(f"Fetching RSS feed natively from {RSS_URL}...")
+    req = urllib.request.Request(RSS_URL, headers={'User-Agent': 'Mozilla/5.0'})
     
     try:
         with urllib.request.urlopen(req) as response:
-            data = json.loads(response.read())
+            xml_data = response.read()
+        root = ET.fromstring(xml_data)
+        
+        entries = []
+        for item in root.findall('.//item'):
+            title_elem = item.find('title')
+            link_elem = item.find('link')
+            if title_elem is not None and link_elem is not None:
+                entries.append({'title': title_elem.text, 'link': link_elem.text})
+                
     except Exception as e:
-        print(f"Error fetching from rss2json: {e}")
+        print(f"Error fetching/parsing native RSS: {e}")
         sys.exit(1)
         
-    if data.get('status') != 'ok':
-        print(f"Warning: rss2json returned an error: {data.get('message', 'Unknown')}")
-        sys.exit(1)
-        
-    entries = data.get('items', [])
     if len(entries) == 0:
-        print("Warning: Feed contains no entries.")
+        print("Warning: Feed contains no entries or parsing failed.")
         sys.exit(1)
         
     posted_urls = load_posted_urls()
