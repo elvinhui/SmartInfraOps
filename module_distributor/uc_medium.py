@@ -266,6 +266,12 @@ def push_to_medium(url, title, content_html):
             """)
             
             if not success:
+                print("Dumping page text to debug:")
+                try:
+                    page_text = driver.execute_script("return document.body.innerText;")
+                    print(page_text)
+                except Exception as e:
+                    print(f"Failed to dump page text: {e}")
                 raise Exception("Failed to find 'This story was originally published elsewhere' label.")
                 
             time.sleep(2)
