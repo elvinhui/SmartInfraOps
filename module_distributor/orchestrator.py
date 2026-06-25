@@ -6,7 +6,7 @@ import urllib.request
 import re
 from openai import OpenAI
 from uc_medium import push_to_medium, FatalError
-from playwright_twitter import post_tweet
+from uc_twitter import post_tweet
 from linkedin_api import post_linkedin
 
 RSS_URL = os.getenv("RSS_URL", "https://smartinfralog.com/index.xml")
@@ -124,7 +124,7 @@ def generate_social_variants(title, url, text):
 You run a blog called "Smart Infra Log". You are writing social media promotional copy for your latest blog post.
 
 You must output exactly a JSON object with two keys:
-"twitter": A short, punchy tweet (max 280 chars) summarizing the technical highlight, slightly self-deprecating, ending with the URL and tags #BuildInPublic #Python.
+"twitter": A short, punchy tweet (max 280 chars) summarizing the technical highlight, slightly self-deprecating, ending with the tags #BuildInPublic #Python. DO NOT append the URL.
 "linkedin": A slightly longer, more professional but still authentic post abstracting the engineering philosophy behind the post, ending with the URL.
 
 Do not wrap the JSON in markdown code blocks, just output the raw JSON."""
@@ -147,7 +147,7 @@ Do not wrap the JSON in markdown code blocks, just output the raw JSON."""
         print(f"Failed to generate social variants via OpenRouter: {e}")
         # Fallback
         return {
-            "twitter": f"New post: {title} {url} #BuildInPublic #Python",
+            "twitter": f"New post: {title} #BuildInPublic #Python",
             "linkedin": f"I just published a new article on my blog about: {title}.\n\nCheck it out here: {url}"
         }
 
@@ -211,7 +211,7 @@ def main():
         
         # 3. Dispatch to X
         print("Pushing to X (Twitter)...")
-        x_success = post_tweet(twitter_text)
+        x_success = post_tweet(twitter_text, url)
         
         # 4. Dispatch to LinkedIn
         print("Pushing to LinkedIn...")

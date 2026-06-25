@@ -47,8 +47,25 @@ jobs:
             echo "Warning: TWITTER_AUTH_JSON_BASE64 secret is not set."
           fi
 
+      - name: Setup Gost Proxy Tunnel
+        env:
+          PROXY_USER: ${{ secrets.PROXY_USER }}
+          PROXY_PASS: ${{ secrets.PROXY_PASS }}
+          PROXY_HOST: ${{ secrets.PROXY_HOST }}
+        run: |
+          wget https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5.gz
+          gzip -d gost-linux-amd64-2.11.5.gz
+          mv gost-linux-amd64-2.11.5 gost
+          chmod +x gost
+          # Start gost bridging local 8080 to the remote residential proxy
+          ./gost -L=:8080 -F=http://${PROXY_USER}:${PROXY_PASS}@${PROXY_HOST#*://} &
+          sleep 2
+          # Test connectivity
+          curl -s -x http://127.0.0.1:8080 http://ip-api.com/json || echo "Proxy test failed"
+
       - name: Run Orchestrator
         env:
+          X_PHASE: '1'
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           X_CONSUMER_KEY: ${{ secrets.X_CONSUMER_KEY }}
           X_CONSUMER_SECRET: ${{ secrets.X_CONSUMER_SECRET }}
