@@ -103,27 +103,22 @@ def push_to_medium(url, title, content_html):
                 time.sleep(2)
         time.sleep(3)
 
-        # 5. Type title
+        # 5. Type title (Blind Typing approach)
         print(f"Typing title: {title}")
         try:
-            title_element = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[contenteditable='true'], h3.graf--title, [data-placeholder='Title'], [aria-placeholder='Title'], h1, [role='textbox']")))
+            # Wait for "Publish" button to ensure page is loaded
+            wait.until(EC.presence_of_element_located((By.XPATH, "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'publish')]")))
         except Exception as e:
-            print(f"Failed to find title element. Current URL: {driver.current_url}")
-            driver.save_screenshot('error_title_timeout.png')
-            print("Page body text snippet:")
-            body_text = driver.execute_script("return document.body.innerText;")
-            print(body_text[:2000])
+            print(f"Failed to find Publish button (page load timeout). Current URL: {driver.current_url}")
+            driver.save_screenshot('error_page_load_timeout.png')
             raise e
             
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", title_element)
-        time.sleep(1)
-        try:
-            title_element.click()
-        except:
-            driver.execute_script("arguments[0].click();", title_element)
+        time.sleep(2) # Give it an extra 2 seconds to ensure React finishes hydrating and focuses the title
         
-        # Use execCommand to insert text robustly
-        driver.execute_script("document.execCommand('insertText', false, arguments[0]);", title)
+        # Medium auto-focuses the Title field on load! We just start typing.
+        actions = ActionChains(driver)
+        actions.send_keys(title)
+        actions.perform()
         time.sleep(1)
 
         # 6. Press Enter to go to body
