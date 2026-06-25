@@ -40,16 +40,12 @@ def verify_ip_killswitch():
         print(f"FATAL: Kill-Switch triggered. Failed to reach external API via proxy. Reason: {e}")
         sys.exit(1)
 
-def bionic_type(element, text):
-    """Bionic typing with random micro-delays and rare 'thinking' pauses."""
-    for char in text:
-        element.send_keys(char)
-        # Standard random delay
-        time.sleep(random.uniform(0.05, 0.2))
-        # 0.5% chance to "think"
-        if random.random() < 0.005:
-            print("Bionic Interaction: Simulating thinking pause...")
-            time.sleep(random.uniform(1.0, 2.0))
+def bionic_type(driver, element, text):
+    """Bionic typing replacement that uses JS to support emojis (non-BMP chars) safely."""
+    print("Bionic Interaction: Simulating thinking pause before typing...")
+    time.sleep(random.uniform(1.0, 3.0))
+    driver.execute_script("document.execCommand('insertText', false, arguments[0]);", text)
+    time.sleep(1.0)
 
 def post_tweet(text, url):
     """
@@ -120,7 +116,7 @@ def post_tweet(text, url):
 
         # 2. Bionic typing
         print(f"Entering text (Phase {phase} mode)...")
-        bionic_type(textarea, text)
+        bionic_type(driver, textarea, text)
         time.sleep(2)
         
         driver.save_screenshot("debug_twitter_before_click.png")
@@ -162,7 +158,7 @@ def post_tweet(text, url):
                 reply_textarea = wait.until(EC.presence_of_element_located((By.XPATH, "//div[@data-testid='tweetTextarea_0']")))
                 print("Injecting URL via self-reply...")
                 reply_msg = f"Full details here: {url}"
-                bionic_type(reply_textarea, reply_msg)
+                bionic_type(driver, reply_textarea, reply_msg)
                 time.sleep(2)
                 
                 reply_submit_xpath = "//button[@data-testid='tweetButton']"

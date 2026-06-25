@@ -31,6 +31,7 @@ def push_to_medium(url, title, content_html):
 
     print("Starting undetected-chromedriver...")
     options = uc.ChromeOptions()
+    options.add_argument('--proxy-server=http://127.0.0.1:8080')
     is_ci = os.getenv("CI", "false").lower() == "true"
     driver = uc.Chrome(options=options, version_main=149, headless=is_ci)
     wait = WebDriverWait(driver, 30)
