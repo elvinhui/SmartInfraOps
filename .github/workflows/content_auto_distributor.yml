@@ -51,15 +51,14 @@ jobs:
         env:
           PROXY_USER: ${{ secrets.PROXY_USER }}
           PROXY_PASS: ${{ secrets.PROXY_PASS }}
-          PROXY_HOST: ${{ secrets.PROXY_HOST }}
         run: |
-          wget https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5.gz
+          wget -q https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5.gz
           gzip -d gost-linux-amd64-2.11.5.gz
           mv gost-linux-amd64-2.11.5 gost
           chmod +x gost
-          # Start gost bridging local 8080 to the remote residential proxy
-          ./gost -L=:8080 -F=http://${PROXY_USER}:${PROXY_PASS}@${PROXY_HOST#*://} &
-          sleep 2
+          # Connect to Fly.io Gost server via WebSocket tunnel
+          ./gost -L=:8080 -F="mwss://${PROXY_USER}:${PROXY_PASS}@smartinfra-proxy.fly.dev:443" &
+          sleep 3
           # Test connectivity
           curl -s -x http://127.0.0.1:8080 http://ip-api.com/json || echo "Proxy test failed"
 
