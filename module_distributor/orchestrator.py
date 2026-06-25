@@ -182,10 +182,18 @@ def main():
     for entry in reversed(entries):
         link = entry.get('link')
         title = entry.get('title')
-        if link:
-            clean_link = link.rstrip('/')
-            if clean_link not in posted_urls:
-                new_entries.append((clean_link, title))
+        
+        if not link:
+            continue
+            
+        # Only process actual blog posts, skip pages like Privacy Policy, About, etc.
+        if "/posts/" not in link:
+            print(f"Skipping non-post page: {title} ({link})")
+            continue
+            
+        clean_link = link.rstrip('/')
+        if clean_link not in posted_urls:
+            new_entries.append((clean_link, title))
 
     if not new_entries:
         print("No new articles to distribute.")
