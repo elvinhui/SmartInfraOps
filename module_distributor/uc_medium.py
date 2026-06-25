@@ -38,7 +38,13 @@ def push_to_medium(url, title, content_html):
     try:
         # Navigate to 404 page first to set cookies for medium.com
         print("Navigating to medium.com to set cookies...")
-        driver.get("https://medium.com/404")
+        for _ in range(3):
+            try:
+                driver.get("https://medium.com/404")
+                break
+            except Exception as e:
+                print(f"Proxy tunnel drop? Retrying get: {e}")
+                time.sleep(2)
         
         for cookie in cookies:
             cookie_dict = {
@@ -88,7 +94,13 @@ def push_to_medium(url, title, content_html):
 
         # 4. Go to Medium new story
         print("Navigating to Medium new story editor...")
-        driver.get("https://medium.com/new-story")
+        for _ in range(3):
+            try:
+                driver.get("https://medium.com/new-story")
+                break
+            except Exception as e:
+                print(f"Proxy tunnel drop? Retrying get: {e}")
+                time.sleep(2)
         time.sleep(3)
 
         # 5. Type title
@@ -204,7 +216,13 @@ def push_to_medium(url, title, content_html):
                 
             settings_url = f"https://medium.com/p/{story_id}/settings"
             print(f"Navigating to settings: {settings_url}")
-            driver.get(settings_url)
+            for _ in range(3):
+                try:
+                    driver.get(settings_url)
+                    break
+                except Exception as e:
+                    print(f"Proxy tunnel drop? Retrying get: {e}")
+                    time.sleep(2)
             
             print("Waiting for settings page to load...")
             time.sleep(5) 

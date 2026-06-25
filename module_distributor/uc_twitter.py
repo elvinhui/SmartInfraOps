@@ -86,7 +86,13 @@ def post_tweet(text, url):
     try:
         # Load X.com to set cookies
         print("Navigating to x.com to set cookies...")
-        driver.get("https://x.com/404")
+        for _ in range(3):
+            try:
+                driver.get("https://x.com/404")
+                break
+            except Exception as e:
+                print(f"Proxy tunnel drop? Retrying get: {e}")
+                time.sleep(2)
         
         for cookie in cookies:
             cookie_dict = {
@@ -103,7 +109,13 @@ def post_tweet(text, url):
                 pass
 
         print("Navigating to X compose page...")
-        driver.get("https://x.com/compose/tweet")
+        for _ in range(3):
+            try:
+                driver.get("https://x.com/compose/tweet")
+                break
+            except Exception as e:
+                print(f"Proxy tunnel drop? Retrying get: {e}")
+                time.sleep(2)
         time.sleep(5)
         
         # 1. Focus text area
