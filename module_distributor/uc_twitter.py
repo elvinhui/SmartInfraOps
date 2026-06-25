@@ -18,27 +18,34 @@ def verify_ip_killswitch():
         "http": "http://127.0.0.1:8080",
         "https": "http://127.0.0.1:8080",
     }
-    try:
-        # Use ip-api.com for ASN and Country info
-        resp = requests.get("http://ip-api.com/json", proxies=proxies, timeout=10)
-        data = resp.json()
-        org = data.get("org", "").lower()
-        isp = data.get("isp", "").lower()
-        country = data.get("countryCode", "").upper()
-        print(f"Detected Proxy Location: {country}, ISP/Org: {org} / {isp}")
-        
-        # Check against Microsoft/Azure/Github
-        if "microsoft" in org or "microsoft" in isp or "github" in org:
-            print("FATAL: Kill-Switch triggered. IP belongs to Microsoft/GitHub. Proxy tunnel failed.")
-            sys.exit(1)
-        
-        # Check geographic alignment if strictly enforced in PRD
-        if country not in ["SG", "MY"]:
-            print(f"Warning: Proxy country is {country}, expected SG or MY. Proceeding at your own risk.")
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Use ip-api.com for ASN and Country info
+            resp = requests.get("http://ip-api.com/json", proxies=proxies, timeout=10)
+            data = resp.json()
+            org = data.get("org", "").lower()
+            isp = data.get("isp", "").lower()
+            country = data.get("countryCode", "").upper()
+            print(f"Detected Proxy Location: {country}, ISP/Org: {org} / {isp}")
             
-    except Exception as e:
-        print(f"FATAL: Kill-Switch triggered. Failed to reach external API via proxy. Reason: {e}")
-        sys.exit(1)
+            # Check against Microsoft/Azure/Github
+            if "microsoft" in org or "microsoft" in isp or "github" in org:
+                print("FATAL: Kill-Switch triggered. IP belongs to Microsoft/GitHub. Proxy tunnel failed.")
+                sys.exit(1)
+            
+            # Check geographic alignment if strictly enforced in PRD
+            if country not in ["SG", "MY"]:
+                print(f"Warning: Proxy country is {country}, expected SG or MY. Proceeding at your own risk.")
+            return # Success
+                
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"IP verify failed ({e}), retrying in 5s...")
+                time.sleep(5)
+            else:
+                print(f"FATAL: Kill-Switch triggered. Failed to reach external API via proxy after retries. Reason: {e}")
+                sys.exit(1)
 
 def bionic_type(driver, element, text):
     """Bionic typing replacement that uses JS to support emojis (non-BMP chars) safely."""
