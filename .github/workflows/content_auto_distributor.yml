@@ -47,11 +47,6 @@ jobs:
             echo "Warning: TWITTER_AUTH_JSON_BASE64 secret is not set."
           fi
 
-      - name: Tailscale
-        uses: tailscale/github-action@v2
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-
       - name: Setup Gost Proxy Tunnel
         env:
           PROXY_USER: ${{ secrets.PROXY_USER }}
