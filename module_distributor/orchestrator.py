@@ -47,6 +47,56 @@ def fetch_article_text(url):
         print(f"Warning: Failed to fetch text from {url}: {e}")
         return ""
 
+def fetch_article_html(url):
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response:
+            html = response.read().decode('utf-8')
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+        article_div = soup.find(class_="ops-article-content")
+        if article_div:
+            return str(article_div)
+        return ""
+    except Exception as e:
+        print(f"Warning: Failed to fetch HTML from {url}: {e}")
+        return ""
+
+def polish_article_with_gemini(html_content):
+    if not html_content:
+        return ""
+    if not GEMINI_API_KEY:
+        print("GEMINI_API_KEY not set. Cannot polish article.")
+        return html_content
+    
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    
+    system_prompt = """你现在是一个顶级的硅谷技术博主兼 Medium 爆款制造机。你的受众是高级软件工程师、独立开发者和技术极客。
+
+你的任务是将一篇硬核的技术设施/自动化理财博客，润色成符合 Medium 调性的高赞文章。
+
+请严格遵循以下润色规则：
+1. **情绪引入 (The Hook)：** 开头必须直击痛点。用略带自嘲、对重复性体力劳动极度厌恶的语气，讲出你为什么要写这个系统（例如：“我实在受够了每个月打开那个又蠢又慢的 Excel 去算汇率了...”）。
+2. **保留硬核 (Keep it Hardcore)：** 绝对不要为了通俗而删减核心技术细节！保留所有的 Python 脚本、MLOps 概念、无状态(Stateless)架构理念和金融代码。受众喜欢看你秀硬核操作。
+3. **降维打击的类比：** 尝试把生活中的问题，用 IT 基础设施的行话来解释。比如“把个人资产当成微服务来管理”、“给自己的现金流加上高可用架构”。
+4. **排版极客化：** 严格使用 Markdown 格式。使用 Blockquotes (引用) 来标出核心箴言，使用代码块高亮代码，标题要有逻辑性和层次感。
+5. **语言风格：** 英文输出，语气要自信、务实、直截了当 (Direct & Pragmatic)，杜绝毫无意义的客套废话。
+
+非常重要的一点：你的输入是一段原始文章的HTML（或者是纯文本）。请直接输出润色后的Markdown内容，不要输出任何其他的客套话或前言后语。"""
+    
+    try:
+        import markdown
+        response = client.models.generate_content(
+            model='gemini-2.5-pro',
+            contents=[system_prompt + "\n\n" + html_content],
+        )
+        md_content = response.text
+        html_output = markdown.markdown(md_content, extensions=['fenced_code', 'tables'])
+        return html_output
+    except Exception as e:
+        print(f"Failed to polish article via Gemini: {e}")
+        return html_content
+
 def generate_social_variants(title, url, text):
     """
     Uses Gemini (3.1 Pro) to generate variants.
@@ -152,6 +202,13 @@ def main():
         
         # 1. Fetch text for AI variants
         text_excerpt = fetch_article_text(url)
+        html_content = fetch_article_html(url)
+        
+        # 1.5 Polish HTML
+        print("Polishing article HTML with Gemini...")
+        polished_html = polish_article_with_gemini(html_content)
+        if not polished_html:
+            polished_html = html_content # fallback
         
         # 2. AI Gen
         print("Generating AI Social Variants...")
@@ -170,7 +227,7 @@ def main():
         # 5. Dispatch to Medium (RPA via Import)
         print("Pushing to Medium (RPA via Import)...")
         try:
-            med_success = push_to_medium(url, title)
+            med_success = push_to_medium(url, title, polished_html)
         except FatalError as e:
             print(f"FATAL ERROR: {e}")
             sys.exit(1)

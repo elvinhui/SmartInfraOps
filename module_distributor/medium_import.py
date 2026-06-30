@@ -4,6 +4,8 @@ import json
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
 
 class FatalError(Exception):
     pass
@@ -55,6 +57,34 @@ def push_to_medium(url, title, content_html=None):
             driver.execute_script("window.localStorage.setItem('viewer-status|is-logged-in', 'true');")
         except:
             pass
+
+        if content_html:
+            print("Preparing to copy AI-polished content...")
+            # Save HTML to local temp file to copy formatting natively
+            temp_html_path = os.path.abspath("temp_post.html")
+            with open(temp_html_path, "w", encoding="utf-8") as f:
+                f.write(f"<html><body><div class='ops-article-content'>{content_html}</div></body></html>")
+            
+            # 1. Go to local file
+            print(f"Navigating to local HTML file: file:///{temp_html_path.replace(os.sep, '/')}...")
+            driver.get(f"file:///{temp_html_path.replace(os.sep, '/')}")
+            time.sleep(1)
+
+            # 2. Select article content
+            print("Copying polished article content to clipboard...")
+            driver.execute_script("""
+                const range = document.createRange();
+                range.selectNodeContents(document.querySelector('.ops-article-content'));
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+            """)
+            time.sleep(1)
+
+            # 3. Copy to clipboard
+            actions = ActionChains(driver)
+            actions.key_down(Keys.CONTROL).send_keys('c').key_up(Keys.CONTROL).perform()
+            time.sleep(1)
 
         # Go to Medium import page
         print("Navigating to Medium import page...")
@@ -125,6 +155,45 @@ def push_to_medium(url, title, content_html=None):
         if not see_story_clicked:
             print("Could not find 'See your story' button, checking if already redirected.")
         
+        # Wait for the editor to load
+        time.sleep(5)
+        
+        if content_html:
+            print("Overwriting imported content with AI-polished content...")
+            # Focus on the editor area
+            driver.execute_script("document.activeElement.blur();")
+            time.sleep(0.5)
+            # Find the title element or just click somewhere in the editor
+            success = driver.execute_script("""
+                var editors = document.querySelectorAll('[contenteditable="true"]');
+                if(editors.length > 0) {
+                    editors[0].focus();
+                    return true;
+                }
+                return false;
+            """)
+            time.sleep(1)
+            
+            # Select all and delete (Ctrl+A, Backspace)
+            print("Clearing imported text...")
+            actions = ActionChains(driver)
+            actions.key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).send_keys(Keys.BACKSPACE).perform()
+            time.sleep(1)
+            
+            # Type title and enter
+            print(f"Typing title: {title}")
+            actions = ActionChains(driver)
+            actions.send_keys(title)
+            actions.send_keys(Keys.RETURN)
+            actions.perform()
+            time.sleep(1)
+            
+            # Paste AI-polished content
+            print("Pasting AI-polished content...")
+            actions = ActionChains(driver)
+            actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
+            time.sleep(5) # wait for medium to auto-save and process images
+        
         # Click Publish button to open modal
         print("Waiting for Publish button to be enabled and clicking...")
         for _ in range(15):
@@ -189,3 +258,9 @@ def push_to_medium(url, title, content_html=None):
         return False
     finally:
         driver.quit()
+        # Clean up temp file
+        if os.path.exists("temp_post.html"):
+            try:
+                os.remove("temp_post.html")
+            except:
+                pass
