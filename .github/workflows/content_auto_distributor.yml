@@ -8,7 +8,7 @@ on:
 
 jobs:
   distribute:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: write # Needed to push posted_urls.txt back to repo
     steps:
@@ -25,7 +25,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r module_distributor/requirements.txt
-          playwright install chromium
 
       - name: Decode Medium Auth JSON
         env:
@@ -37,35 +36,11 @@ jobs:
             echo "Warning: MEDIUM_AUTH_JSON_BASE64 secret is not set."
           fi
 
-      - name: Decode Twitter Auth JSON
-        env:
-          TWITTER_AUTH_JSON_BASE64: ${{ secrets.TWITTER_AUTH_JSON_BASE64 }}
-        run: |
-          if [ -n "$TWITTER_AUTH_JSON_BASE64" ]; then
-            echo "$TWITTER_AUTH_JSON_BASE64" | base64 --decode > module_distributor/twitter_auth.json
-          else
-            echo "Warning: TWITTER_AUTH_JSON_BASE64 secret is not set."
-          fi
-
-      - name: Setup Gost Proxy Tunnel
-        env:
-          PROXY_USER: ${{ secrets.PROXY_USER }}
-          PROXY_PASS: ${{ secrets.PROXY_PASS }}
-        run: |
-          wget -q https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5.gz
-          gzip -d gost-linux-amd64-2.11.5.gz
-          mv gost-linux-amd64-2.11.5 gost
-          chmod +x gost
-          # Connect to Fly.io Gost server via WebSocket tunnel
-          ./gost -L=:8080 -F="mwss://${PROXY_USER}:${PROXY_PASS}@smartinfra-proxy.fly.dev:443" &
-          sleep 3
-          # Test connectivity
-          curl -s -x http://127.0.0.1:8080 http://ip-api.com/json || echo "Proxy test failed"
 
       - name: Run Orchestrator
         env:
           X_PHASE: '1'
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           X_CONSUMER_KEY: ${{ secrets.X_CONSUMER_KEY }}
           X_CONSUMER_SECRET: ${{ secrets.X_CONSUMER_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
@@ -73,10 +48,8 @@ jobs:
           LINKEDIN_TOKEN: ${{ secrets.LINKEDIN_TOKEN }}
           LINKEDIN_PERSON_URN: ${{ secrets.LINKEDIN_PERSON_URN }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb
           cd module_distributor
-          xvfb-run --auto-servernum python orchestrator.py
+          python orchestrator.py
 
       - name: Commit posted URLs
         run: |
