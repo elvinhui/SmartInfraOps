@@ -9,6 +9,9 @@ on:
 jobs:
   distribute:
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: bash
     permissions:
       contents: write # Needed to push posted_urls.txt back to repo
     steps:
