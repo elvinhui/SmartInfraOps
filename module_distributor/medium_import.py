@@ -21,7 +21,7 @@ def push_to_medium(url, title, content_html=None):
         print(f"Error: {auth_file} not found. Cannot authenticate with Medium.")
         if os.path.exists('medium_auth.json'):
             print("Loading cookies from medium_auth.json...")
-            with open('medium_auth.json', 'r') as f:
+            with open('medium_auth.json', 'r', encoding='utf-8-sig') as f:
                 try:
                     auth_data = json.load(f)
                 except Exception as e:
@@ -29,7 +29,7 @@ def push_to_medium(url, title, content_html=None):
                     auth_data = []
     else:
         print(f"Loading cookies from {auth_file}...")
-        with open(auth_file, "r") as f:
+        with open(auth_file, "r", encoding='utf-8-sig') as f:
             try:
                 auth_data = json.load(f)
             except Exception as e:

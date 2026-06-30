@@ -87,7 +87,7 @@ def polish_article_with_gemini(html_content):
     try:
         import markdown
         response = client.models.generate_content(
-            model='gemini-pro',
+            model='gemini-2.0-flash',
             contents=[system_prompt + "\n\n" + html_content],
         )
         md_content = response.text
@@ -123,7 +123,7 @@ Do not wrap the JSON in markdown code blocks, just output the raw JSON."""
 
     try:
         response = client.models.generate_content(
-            model='gemini-pro',
+            model='gemini-2.0-flash',
             contents=[system_prompt + "\n\n" + user_prompt],
         )
         
