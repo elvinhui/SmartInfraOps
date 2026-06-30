@@ -19,14 +19,28 @@ def push_to_medium(url, title, content_html=None):
     auth_file = os.getenv("MEDIUM_AUTH_JSON_FILE", "medium_auth.json")
     if not os.path.exists(auth_file):
         print(f"Error: {auth_file} not found. Cannot authenticate with Medium.")
-        return False
-
-    print(f"Loading cookies from {auth_file}...")
-    with open(auth_file, "r") as f:
-        auth_data = json.load(f)
-    
-    cookies = auth_data.get("cookies", [])
-
+        if os.path.exists('medium_auth.json'):
+            print("Loading cookies from medium_auth.json...")
+            with open('medium_auth.json', 'r') as f:
+                try:
+                    auth_data = json.load(f)
+                except Exception as e:
+                    print(f"Warning: Failed to parse medium_auth.json: {e}")
+                    auth_data = []
+    else:
+        print(f"Loading cookies from {auth_file}...")
+        with open(auth_file, "r") as f:
+            try:
+                auth_data = json.load(f)
+            except Exception as e:
+                print(f"Warning: Failed to parse {auth_file}: {e}")
+                auth_data = []
+    if isinstance(auth_data, dict):
+        cookies = auth_data.get("cookies", [])
+    elif isinstance(auth_data, list):
+        cookies = auth_data
+    else:
+        cookies = []
     print("Starting undetected-chromedriver (Local)...")
     options = uc.ChromeOptions()
     # No proxy used since this is running on self-hosted runner
