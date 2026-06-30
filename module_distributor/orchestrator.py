@@ -87,7 +87,7 @@ def polish_article_with_gemini(html_content):
     try:
         import markdown
         response = client.models.generate_content(
-            model='gemini-2.5-pro',
+            model='gemini-1.5-pro',
             contents=[system_prompt + "\n\n" + html_content],
         )
         md_content = response.text
@@ -123,7 +123,7 @@ Do not wrap the JSON in markdown code blocks, just output the raw JSON."""
 
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-pro', # Fallback to gemini-pro if 3.1 is not natively accepted by the older SDK name, actually we should use gemini-pro or gemini-2.5-pro
+            model='gemini-1.5-pro',
             contents=[system_prompt + "\n\n" + user_prompt],
         )
         
@@ -218,7 +218,10 @@ def main():
         
         # 3. Dispatch to X
         print("Pushing to X (Twitter)...")
-        x_success = post_tweet(twitter_text, url)
+        if twitter_text:
+            x_success = post_tweet(f"{twitter_text}\n\n{url}")
+        else:
+            x_success = False
         
         # 4. Dispatch to LinkedIn
         print("Pushing to LinkedIn...")
