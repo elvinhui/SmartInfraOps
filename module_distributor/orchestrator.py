@@ -162,7 +162,12 @@ def main():
         print("No new articles to distribute.")
         return
 
-    print(f"Found {len(new_entries)} new article(s) to distribute.")
+    if len(new_entries) > 2:
+        print(f"Limiting to 2 articles per run (out of {len(new_entries)} new ones) to avoid bot detection.")
+        new_entries = new_entries[:2]
+    else:
+        print(f"Found {len(new_entries)} new article(s) to distribute.")
+
     success_count = 0
 
     for url, title in new_entries:
