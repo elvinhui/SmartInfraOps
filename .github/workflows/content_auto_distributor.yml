@@ -81,6 +81,7 @@ jobs:
           python orchestrator.py
 
       - name: Commit posted URLs
+        if: always()
         run: |
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
