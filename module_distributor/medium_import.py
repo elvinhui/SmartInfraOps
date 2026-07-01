@@ -154,7 +154,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
         found_input = False
         for _ in range(15):
             input_elem = driver.execute_script("""
-                var inputs = document.querySelectorAll('input');
+                var inputs = document.querySelectorAll('.js-importUrl, [data-default-value*="yoursite"], div[contenteditable="true"], input');
                 for (var i = 0; i < inputs.length; i++) {
                     var rect = inputs[i].getBoundingClientRect();
                     if (rect.width > 0 && rect.height > 0 && rect.top > 100) {
