@@ -91,7 +91,8 @@ def _build_driver() -> uc.Chrome:
     options.add_argument("--window-size=1280,800")
     # Do NOT pass headless=True so Medium doesn't trigger bot protection.
     # Xvfb provides a virtual display on the Linux runner.
-    driver = uc.Chrome(options=options, headless=False)
+    # Specify version_main=149 to match the Chrome version on ubuntu-latest
+    driver = uc.Chrome(options=options, version_main=149, headless=False)
     return driver
 
 

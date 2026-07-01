@@ -72,15 +72,17 @@ def fetch_article_html(url):
 # ──────────────────────────────────────────────────────────────────────────────
 
 def generate_social_variants(title, url, text):
-    """Uses Gemini to generate Twitter + LinkedIn copy."""
-    if not GEMINI_API_KEY:
-        print("GEMINI_API_KEY not set. Using fallback text.")
+    """Uses DeepSeek to generate Twitter + LinkedIn copy."""
+    if not DEEPSEEK_API_KEY:
+        print("DEEPSEEK_API_KEY not set. Using fallback text.")
         return {
             "twitter": f"New post: {title} #BuildInPublic #Python",
             "linkedin": f"I just published: {title}\n\n{url}",
         }
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    import openai
+    client = openai.OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+    
     system_prompt = (
         'You are a cynical but highly skilled DevOps/Infrastructure engineer who hates repetitive tasks. '
         'You run a blog called "Smart Infra Log". '
@@ -94,20 +96,20 @@ def generate_social_variants(title, url, text):
     user_prompt = f"Title: {title}\nURL: {url}\n\nArticle excerpt:\n{text}"
 
     try:
-        response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            contents=[system_prompt + "\n\n" + user_prompt],
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=1024,
+            temperature=0.7
         )
-        result_text = response.text.strip()
-        if result_text.startswith("```json"):
-            result_text = result_text[7:]
-        elif result_text.startswith("```"):
-            result_text = result_text[3:]
-        if result_text.endswith("```"):
-            result_text = result_text[:-3]
-        return json.loads(result_text.strip())
+        result_text = response.choices[0].message.content.strip()
+        return json.loads(result_text)
     except Exception as e:
-        print(f"Failed to generate social variants via Gemini: {e}")
+        print(f"Failed to generate social variants via DeepSeek: {e}")
         return {
             "twitter": f"New post: {title} #BuildInPublic #Python",
             "linkedin": f"I just published: {title}\n\n{url}",
