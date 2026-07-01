@@ -13,6 +13,7 @@ RSS_URL = os.getenv("RSS_URL", "https://smartinfralog.com/index.xml")
 POSTED_URLS_FILE = os.path.join(os.path.dirname(__file__), "posted_urls.txt")
 
 # AI Configuration
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 
