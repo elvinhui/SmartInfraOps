@@ -136,8 +136,14 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
                 driver.add_cookie(cookie_dict)
             except Exception:
                 pass
+                
+        try:
+            driver.execute_script("window.localStorage.setItem('viewer-status|is-logged-in', 'true');")
+        except Exception:
+            pass
 
         # ── Step 2: Navigate to Medium Import page ─────────────────────────
+
         print("Navigating to Medium import page...")
         driver.get("https://medium.com/p/import")
         time.sleep(4)
