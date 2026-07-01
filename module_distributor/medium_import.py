@@ -158,8 +158,9 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
                 var found = false;
                 for (var i = 0; i < inputs.length; i++) {
                     var rect = inputs[i].getBoundingClientRect();
-                    var placeholder = (inputs[i].getAttribute('placeholder') || '').toLowerCase();
-                    if (rect.width > 0 && rect.height > 0 && (placeholder.includes('http') || placeholder.includes('yoursite') || placeholder.includes('link'))) {
+                    // The search bar is in the navbar (top < 100). 
+                    // The import box is in the main body (top > 100).
+                    if (rect.width > 0 && rect.height > 0 && rect.top > 100) {
                         inputs[i].focus();
                         var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
                         nativeInputValueSetter.call(inputs[i], arguments[0]);
