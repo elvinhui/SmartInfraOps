@@ -242,8 +242,11 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
         if polished_markdown:
             print("Replacing imported content with AI-polished version...")
 
+            # Prepend the title to the polished markdown so we can paste it all at once
+            full_text = f"{title}\n\n{polished_markdown}"
+
             # Put polished markdown into clipboard
-            _set_clipboard(polished_markdown)
+            _set_clipboard(full_text)
             time.sleep(0.5)
 
             # Focus first contenteditable (Medium editor)
@@ -260,25 +263,28 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
                 raise Exception("Could not find Medium editor contenteditable.")
             
             time.sleep(1)
-            actions = ActionChains(driver)
-            # Select all and delete
-            actions.key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
-            time.sleep(1)
-            actions = ActionChains(driver)
-            actions.send_keys(Keys.DELETE).perform()
-            time.sleep(1)
+            
+            # Use xdotool if available (much more reliable in Xvfb than Selenium ActionChains)
+            import shutil
+            if shutil.which("xdotool"):
+                print("Clearing editor and pasting via xdotool...")
+                for _ in range(3):
+                    subprocess.run(["xdotool", "key", "ctrl+a"])
+                    time.sleep(0.3)
+                subprocess.run(["xdotool", "key", "Delete"])
+                time.sleep(1)
+                subprocess.run(["xdotool", "key", "ctrl+v"])
+            else:
+                print("Clearing editor and pasting via ActionChains...")
+                actions = ActionChains(driver)
+                for _ in range(3):
+                    actions.key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
+                    time.sleep(0.3)
+                actions.send_keys(Keys.DELETE).perform()
+                time.sleep(1)
+                actions = ActionChains(driver)
+                actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
 
-            # Type title on first line
-            actions = ActionChains(driver)
-            actions.send_keys(title).perform()
-            time.sleep(0.5)
-            actions = ActionChains(driver)
-            actions.send_keys(Keys.RETURN).perform()
-            time.sleep(0.5)
-
-            # Paste polished content
-            actions = ActionChains(driver)
-            actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
             time.sleep(5)
             print("Polished content pasted.")
             driver.save_screenshot("module_distributor/debug_after_paste.png")
