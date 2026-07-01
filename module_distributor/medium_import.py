@@ -150,23 +150,29 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
 
         # ── Step 3: Enter the canonical URL ───────────────────────────────
         print(f"Entering canonical URL: {canonical_url}")
-        # Try to find the URL input field
-        found_input = driver.execute_script("""
-            var inputs = document.querySelectorAll('input[type="url"], input[type="text"], input:not([type])');
-            for (var i = 0; i < inputs.length; i++) {
-                var rect = inputs[i].getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0) {
-                    inputs[i].focus();
-                    inputs[i].value = arguments[0];
-                    var tracker = inputs[i]._valueTracker;
-                    if (tracker) { tracker.setValue(''); }
-                    inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
-                    inputs[i].dispatchEvent(new Event('change', { bubbles: true }));
-                    return true;
+        
+        found_input = False
+        for _ in range(15):
+            found_input = driver.execute_script("""
+                var inputs = document.querySelectorAll('input');
+                var found = false;
+                for (var i = 0; i < inputs.length; i++) {
+                    var rect = inputs[i].getBoundingClientRect();
+                    if (rect.width > 0 && rect.height > 0) {
+                        inputs[i].focus();
+                        inputs[i].value = arguments[0];
+                        var tracker = inputs[i]._valueTracker;
+                        if (tracker) { tracker.setValue(''); }
+                        inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
+                        inputs[i].dispatchEvent(new Event('change', { bubbles: true }));
+                        found = true;
+                    }
                 }
-            }
-            return false;
-        """, canonical_url)
+                return found;
+            """, canonical_url)
+            if found_input:
+                break
+            time.sleep(2)
 
         if not found_input:
             raise Exception("Failed to find URL input field on Medium import page.")
