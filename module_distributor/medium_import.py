@@ -153,27 +153,26 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
         
         found_input = False
         for _ in range(15):
-            found_input = driver.execute_script("""
+            input_elem = driver.execute_script("""
                 var inputs = document.querySelectorAll('input');
-                var found = false;
                 for (var i = 0; i < inputs.length; i++) {
                     var rect = inputs[i].getBoundingClientRect();
-                    // The search bar is in the navbar (top < 100). 
-                    // The import box is in the main body (top > 100).
                     if (rect.width > 0 && rect.height > 0 && rect.top > 100) {
-                        inputs[i].focus();
-                        var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                        nativeInputValueSetter.call(inputs[i], arguments[0]);
-                        inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
-                        inputs[i].dispatchEvent(new Event('change', { bubbles: true }));
-                        found = true;
-                        break;
+                        return inputs[i];
                     }
                 }
-                return found;
-            """, canonical_url)
-            if found_input:
-                break
+                return null;
+            """)
+            if input_elem:
+                try:
+                    input_elem.click()
+                    time.sleep(0.5)
+                    input_elem.clear()
+                    input_elem.send_keys(canonical_url)
+                    found_input = True
+                    break
+                except Exception as e:
+                    print(f"Error sending keys to input: {e}")
             time.sleep(2)
 
         if not found_input:
