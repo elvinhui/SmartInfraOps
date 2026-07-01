@@ -158,13 +158,15 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
                 var found = false;
                 for (var i = 0; i < inputs.length; i++) {
                     var rect = inputs[i].getBoundingClientRect();
-                    if (rect.width > 0 && rect.height > 0) {
+                    var placeholder = (inputs[i].getAttribute('placeholder') || '').toLowerCase();
+                    if (rect.width > 0 && rect.height > 0 && (placeholder.includes('http') || placeholder.includes('yoursite') || placeholder.includes('link'))) {
                         inputs[i].focus();
                         var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
                         nativeInputValueSetter.call(inputs[i], arguments[0]);
                         inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
                         inputs[i].dispatchEvent(new Event('change', { bubbles: true }));
                         found = true;
+                        break;
                     }
                 }
                 return found;
