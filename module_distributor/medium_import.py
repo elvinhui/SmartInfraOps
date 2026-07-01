@@ -1,138 +1,176 @@
+"""
+medium_import.py
+Pushes an article to Medium using the "Import a story" feature via
+undetected_chromedriver. Canonical link is automatically preserved by
+Medium's import mechanism (it reads the original URL you supply).
+
+After import, the AI-polished Markdown content is pasted into the editor
+via clipboard to replace the raw imported text.
+"""
 import os
+import sys
 import time
 import json
+import subprocess
+import tempfile
+
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
+
 
 class FatalError(Exception):
     pass
 
-def push_to_medium(url, title, content_html=None):
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _load_cookies() -> list:
     """
-    Imports an article to Medium using the 'Import a story' feature.
-    This automatically sets the canonical URL.
-    Returns True on success, False on recoverable error.
+    Reads cookies from medium_auth.json (placed by workflow).
+    Supports both a bare list and {"cookies": [...]} shape.
     """
-    auth_file = os.getenv("MEDIUM_AUTH_JSON_FILE", "medium_auth.json")
+    auth_file = os.path.join(os.path.dirname(__file__), "medium_auth.json")
     if not os.path.exists(auth_file):
-        print(f"Error: {auth_file} not found. Cannot authenticate with Medium.")
-        if os.path.exists('medium_auth.json'):
-            print("Loading cookies from medium_auth.json...")
-            with open('medium_auth.json', 'r', encoding='utf-8-sig') as f:
-                try:
-                    auth_data = json.load(f)
-                except Exception as e:
-                    print(f"Warning: Failed to parse medium_auth.json: {e}")
-                    auth_data = []
-    else:
-        print(f"Loading cookies from {auth_file}...")
-        with open(auth_file, "r", encoding='utf-8-sig') as f:
-            try:
-                auth_data = json.load(f)
-            except Exception as e:
-                print(f"Warning: Failed to parse {auth_file}: {e}")
-                auth_data = []
-    if isinstance(auth_data, dict):
-        cookies = auth_data.get("cookies", [])
-    elif isinstance(auth_data, list):
-        cookies = auth_data
-    else:
-        cookies = []
-    print("Starting undetected-chromedriver (Local)...")
-    options = uc.ChromeOptions()
-    # No proxy used since this is running on self-hosted runner
-    driver = uc.Chrome(options=options, version_main=149, headless=False)
-    wait = WebDriverWait(driver, 30)
-    
+        print(f"Warning: {auth_file} not found. No cookies loaded.")
+        return []
     try:
-        # Navigate to 404 page first to set cookies for medium.com
-        print("Navigating to medium.com to set cookies...")
+        with open(auth_file, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+        return data.get("cookies", [])
+    except Exception as e:
+        print(f"Warning: Failed to parse medium_auth.json: {e}")
+        return []
+
+
+def _set_clipboard(text: str):
+    """
+    Cross-platform clipboard write.
+    On Linux uses xclip/xsel; falls back to a temp file approach.
+    """
+    try:
+        # Try xclip (available after apt-get install xclip)
+        proc = subprocess.run(
+            ["xclip", "-selection", "clipboard"],
+            input=text.encode("utf-8"),
+            check=True,
+        )
+        return
+    except Exception:
+        pass
+    try:
+        proc = subprocess.run(
+            ["xsel", "--clipboard", "--input"],
+            input=text.encode("utf-8"),
+            check=True,
+        )
+        return
+    except Exception:
+        pass
+    # Last resort: pyperclip if installed
+    try:
+        import pyperclip
+        pyperclip.copy(text)
+    except Exception as e:
+        print(f"Warning: All clipboard methods failed: {e}")
+
+
+def _build_driver() -> uc.Chrome:
+    """Spin up an undetected Chromium instance (headless via Xvfb on Linux)."""
+    options = uc.ChromeOptions()
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1280,800")
+    # Do NOT pass headless=True so Medium doesn't trigger bot protection.
+    # Xvfb provides a virtual display on the Linux runner.
+    driver = uc.Chrome(options=options, headless=False)
+    return driver
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Main entry point
+# ──────────────────────────────────────────────────────────────────────────────
+
+def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") -> bool:
+    """
+    Imports an article into Medium via the Import feature, which automatically
+    sets the canonical link back to `canonical_url`.
+
+    If `polished_markdown` is supplied, the imported content is replaced with
+    the AI-polished version via clipboard paste.
+
+    Returns True on success, False on recoverable error.
+    Raises FatalError for unrecoverable problems.
+    """
+    cookies = _load_cookies()
+    driver = _build_driver()
+    wait = WebDriverWait(driver, 30)
+
+    try:
+        # ── Step 1: Set session cookies ────────────────────────────────────
+        print("Setting Medium session cookies...")
         driver.get("https://medium.com/404")
-        
-        for cookie in cookies:
+        time.sleep(2)
+
+        for c in cookies:
             cookie_dict = {
-                "name": cookie["name"],
-                "value": cookie["value"],
-                "domain": cookie.get("domain", ".medium.com"),
-                "path": cookie.get("path", "/")
+                "name": c["name"],
+                "value": c["value"],
+                "domain": c.get("domain", ".medium.com"),
+                "path": c.get("path", "/"),
             }
-            if "secure" in cookie: cookie_dict["secure"] = cookie["secure"]
-            if "httpOnly" in cookie: cookie_dict["httpOnly"] = cookie["httpOnly"]
-            
+            if "secure" in c:
+                cookie_dict["secure"] = c["secure"]
+            if "httpOnly" in c:
+                cookie_dict["httpOnly"] = c["httpOnly"]
             try:
                 driver.add_cookie(cookie_dict)
             except Exception:
-                pass # Ignore if invalid
+                pass
 
-        try:
-            driver.execute_script("window.localStorage.setItem('viewer-status|is-logged-in', 'true');")
-        except:
-            pass
-
-        if content_html:
-            print("Preparing to copy AI-polished content...")
-            # Save HTML to local temp file to copy formatting natively
-            temp_html_path = os.path.abspath("temp_post.html")
-            with open(temp_html_path, "w", encoding="utf-8") as f:
-                f.write(f"<html><body><div class='ops-article-content'>{content_html}</div></body></html>")
-            
-            # 1. Go to local file
-            print(f"Navigating to local HTML file: file:///{temp_html_path.replace(os.sep, '/')}...")
-            driver.get(f"file:///{temp_html_path.replace(os.sep, '/')}")
-            time.sleep(1)
-
-            # 2. Select article content
-            print("Copying polished article content to clipboard...")
-            driver.execute_script("""
-                const range = document.createRange();
-                range.selectNodeContents(document.querySelector('.ops-article-content'));
-                const sel = window.getSelection();
-                sel.removeAllRanges();
-                sel.addRange(range);
-            """)
-            time.sleep(1)
-
-            # 3. Copy to clipboard
-            actions = ActionChains(driver)
-            actions.key_down(Keys.CONTROL).send_keys('c').key_up(Keys.CONTROL).perform()
-            time.sleep(1)
-
-        # Go to Medium import page
+        # ── Step 2: Navigate to Medium Import page ─────────────────────────
         print("Navigating to Medium import page...")
         driver.get("https://medium.com/p/import")
-        time.sleep(3)
+        time.sleep(4)
 
-        # Input URL
-        print(f"Inputting URL: {url}")
-        success = driver.execute_script(f"""
+        # ── Step 3: Enter the canonical URL ───────────────────────────────
+        print(f"Entering canonical URL: {canonical_url}")
+        # Try to find the URL input field
+        found_input = driver.execute_script("""
             var inputs = document.querySelectorAll('input[type="url"], input[type="text"], input:not([type])');
-            for (var i=0; i<inputs.length; i++) {{
+            for (var i = 0; i < inputs.length; i++) {
                 var rect = inputs[i].getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0) {{
-                    inputs[i].value = '{url}';
+                if (rect.width > 0 && rect.height > 0) {
+                    inputs[i].focus();
+                    inputs[i].value = arguments[0];
                     var tracker = inputs[i]._valueTracker;
-                    if (tracker) {{ tracker.setValue(''); }}
-                    inputs[i].dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    inputs[i].dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    if (tracker) { tracker.setValue(''); }
+                    inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
+                    inputs[i].dispatchEvent(new Event('change', { bubbles: true }));
                     return true;
-                }}
-            }}
+                }
+            }
             return false;
-        """)
-        
-        if not success:
-            raise Exception("Failed to find URL input field on Import page.")
-            
+        """, canonical_url)
+
+        if not found_input:
+            raise Exception("Failed to find URL input field on Medium import page.")
+
         time.sleep(1)
-        
-        # Click Import button
+
+        # ── Step 4: Click the Import button ───────────────────────────────
         print("Clicking Import button...")
-        success = driver.execute_script("""
+        clicked = driver.execute_script("""
             var btns = document.querySelectorAll('button');
-            for (var i=0; i<btns.length; i++) {
+            for (var i = 0; i < btns.length; i++) {
                 var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
                 if (txt.includes('import')) {
                     btns[i].click();
@@ -141,20 +179,20 @@ def push_to_medium(url, title, content_html=None):
             }
             return false;
         """)
-        if not success:
+        if not clicked:
             raise Exception("Failed to find Import button.")
-            
-        # Wait for import to complete and click "See your story"
+
+        # ── Step 5: Wait for "See your story" / redirect to editor ────────
         print("Waiting for import to complete...")
         see_story_clicked = False
-        for _ in range(15):
+        for _ in range(20):
             time.sleep(2)
             clicked = driver.execute_script("""
-                var btns = document.querySelectorAll('button, a');
-                for (var i=0; i<btns.length; i++) {
-                    var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
+                var els = document.querySelectorAll('button, a');
+                for (var i = 0; i < els.length; i++) {
+                    var txt = (els[i].innerText || els[i].textContent || '').toLowerCase().trim();
                     if (txt.includes('see your story') || txt.includes('edit your story')) {
-                        btns[i].click();
+                        els[i].click();
                         return true;
                     }
                 }
@@ -162,119 +200,136 @@ def push_to_medium(url, title, content_html=None):
             """)
             if clicked:
                 see_story_clicked = True
-                print("Clicked 'See your story' button.")
+                print("Clicked 'See your story'.")
                 time.sleep(5)
                 break
-                
+
         if not see_story_clicked:
-            print("Could not find 'See your story' button, checking if already redirected.")
-        
-        # Wait for the editor to load
+            print("'See your story' button not found; checking current URL...")
+
+        # Wait for editor to fully load
         time.sleep(5)
-        
-        if content_html:
-            print("Overwriting imported content with AI-polished content...")
-            # Focus on the editor area
-            driver.execute_script("document.activeElement.blur();")
+        print(f"Current URL after import: {driver.current_url}")
+
+        # ── Step 6: Paste AI-polished content (if provided) ───────────────
+        if polished_markdown:
+            print("Replacing imported content with AI-polished version...")
+
+            # Put polished markdown into clipboard
+            _set_clipboard(polished_markdown)
             time.sleep(0.5)
-            # Find the title element or just click somewhere in the editor
-            success = driver.execute_script("""
+
+            # Focus first contenteditable (Medium editor)
+            focused = driver.execute_script("""
                 var editors = document.querySelectorAll('[contenteditable="true"]');
-                if(editors.length > 0) {
+                if (editors.length > 0) {
                     editors[0].focus();
-                    return true;
+                    return editors.length;
                 }
-                return false;
+                return 0;
             """)
-            time.sleep(1)
-            
-            # Select all and delete (Ctrl+A, Backspace)
-            print("Clearing imported text...")
-            actions = ActionChains(driver)
-            actions.key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).send_keys(Keys.BACKSPACE).perform()
-            time.sleep(1)
-            
-            # Type title and enter
-            print(f"Typing title: {title}")
-            actions = ActionChains(driver)
-            actions.send_keys(title)
-            actions.send_keys(Keys.RETURN)
-            actions.perform()
-            time.sleep(1)
-            
-            # Paste AI-polished content
-            print("Pasting AI-polished content...")
-            actions = ActionChains(driver)
-            actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
-            time.sleep(5) # wait for medium to auto-save and process images
-        
-        # Click Publish button to open modal
-        print("Waiting for Publish button to be enabled and clicking...")
-        for _ in range(15):
-            success = driver.execute_script("""
+            if not focused:
+                print("Warning: Could not find Medium editor. Skipping paste.")
+            else:
+                time.sleep(0.5)
+                actions = ActionChains(driver)
+                # Select all and delete
+                actions.key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
+                time.sleep(0.5)
+                actions = ActionChains(driver)
+                actions.send_keys(Keys.DELETE).perform()
+                time.sleep(0.5)
+
+                # Type title on first line
+                actions = ActionChains(driver)
+                actions.send_keys(title).perform()
+                time.sleep(0.3)
+                actions = ActionChains(driver)
+                actions.send_keys(Keys.RETURN).perform()
+                time.sleep(0.3)
+
+                # Paste polished content
+                actions = ActionChains(driver)
+                actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
+                time.sleep(4)
+                print("Polished content pasted.")
+
+        # ── Step 7: Publish ───────────────────────────────────────────────
+        print("Waiting for Publish button...")
+        publish_clicked = False
+        for _ in range(20):
+            clicked = driver.execute_script("""
                 var btns = document.querySelectorAll('button');
-                for(var i=0; i<btns.length; i++){
+                for (var i = 0; i < btns.length; i++) {
                     var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
-                    if(txt === 'publish' && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled')) {
+                    if (txt === 'publish' && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled')) {
                         btns[i].click();
                         return true;
                     }
                 }
                 return false;
             """)
-            if success:
+            if clicked:
+                publish_clicked = True
                 break
             time.sleep(2)
-            
-        print("Waiting for modal to render...")
+
+        if not publish_clicked:
+            print("Warning: Publish button not found after waiting.")
+
         time.sleep(5)
-        
-        # Click final Publish button in the modal
-        print("Clicking final Publish button...")
+
+        # Click "Publish now" in the confirmation modal
+        print("Clicking final 'Publish now' button...")
         driver.execute_script("""
             var btns = Array.from(document.querySelectorAll('button'));
-            var publishNowBtn = btns.find(b => {
+            var btn = btns.find(b => {
                 var txt = (b.innerText || b.textContent || '').toLowerCase().trim();
                 return txt.includes('publish now');
             });
-            if (publishNowBtn) {
-                publishNowBtn.click();
-            } else {
-                var publishBtns = btns.filter(b => {
-                    var txt = (b.innerText || b.textContent || '').toLowerCase().trim();
-                    return txt === 'publish';
-                });
-                if (publishBtns.length > 1) {
-                    publishBtns[publishBtns.length - 1].click();
-                } else if (publishBtns.length === 1) {
-                    publishBtns[0].click();
-                }
+            if (btn) {
+                btn.click();
+                return;
+            }
+            // Fallback: last button with text 'publish'
+            var pubs = btns.filter(b => {
+                var txt = (b.innerText || b.textContent || '').toLowerCase().trim();
+                return txt === 'publish';
+            });
+            if (pubs.length > 0) {
+                pubs[pubs.length - 1].click();
             }
         """)
-        
-        print("Waiting for story to be published...")
+
+        # Wait for redirect away from editor
+        print("Waiting for publish to complete...")
         for _ in range(20):
-            if "new-story" not in driver.current_url and "edit" not in driver.current_url:
+            cur = driver.current_url
+            if "new-story" not in cur and "/edit" not in cur and "p/import" not in cur:
                 break
             time.sleep(1)
-            
-        print(f"Successfully pushed {url} to Medium (Imported and Published).")
+
+        print(f"Successfully published {canonical_url} to Medium.")
         return True
-        
+
     except FatalError:
         raise
     except Exception as e:
-        print(f"Recoverable error while pushing {url} to Medium via Import: {e}")
+        print(f"Recoverable error while pushing {canonical_url} to Medium: {e}")
         try:
-            driver.save_screenshot("error_medium_import_uc.png")
-        except:
+            driver.save_screenshot("error_medium_uc.png")
+        except Exception:
             pass
         return False
     finally:
-        driver.quit()
-        # Clean up temp file
-        if os.path.exists("temp_post.html"):
+        try:
+            driver.quit()
+        except Exception:
+            pass
+        # Clean up auth file
+        auth_file = os.path.join(os.path.dirname(__file__), "medium_auth.json")
+        if os.path.exists(auth_file):
             try:
-                os.remove("temp_post.html")
-            except:
+                os.remove(auth_file)
+            except Exception:
                 pass

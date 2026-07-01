@@ -6,7 +6,7 @@ import urllib.request
 import re
 from google import genai
 from medium_import import push_to_medium, FatalError
-from twitter_api import post_tweet
+from twitter_playwright import post_tweet
 from linkedin_api import post_linkedin
 
 RSS_URL = os.getenv("RSS_URL", "https://smartinfralog.com/index.xml")
@@ -85,17 +85,16 @@ def polish_article_with_gemini(html_content):
 非常重要的一点：你的输入是一段原始文章的HTML（或者是纯文本）。请直接输出润色后的Markdown内容，不要输出任何其他的客套话或前言后语。"""
     
     try:
-        import markdown
+        import markdown as _md_lib
         response = client.models.generate_content(
             model='gemini-2.0-flash',
             contents=[system_prompt + "\n\n" + html_content],
         )
         md_content = response.text
-        html_output = markdown.markdown(md_content, extensions=['fenced_code', 'tables'])
-        return html_output
+        return md_content  # Return raw Markdown; medium_import will paste it
     except Exception as e:
         print(f"Failed to polish article via Gemini: {e}")
-        return html_content
+        return ""  # Return empty so fallback uses raw import
 
 def generate_social_variants(title, url, text):
     """
@@ -204,12 +203,11 @@ def main():
         text_excerpt = fetch_article_text(url)
         html_content = fetch_article_html(url)
         
-        # 1.5 Polish HTML
-        print("Polishing article HTML with Gemini...")
-        polished_html = polish_article_with_gemini(html_content)
-        if not polished_html:
-            polished_html = html_content # fallback
-        
+        # 1.5 Polish article with Gemini (returns Markdown)
+        print("Polishing article with Gemini...")
+        polished_markdown = polish_article_with_gemini(html_content)
+        # polished_markdown empty means fallback: Medium will use the raw import
+
         # 2. AI Gen
         print("Generating AI Social Variants...")
         variants = generate_social_variants(title, url, text_excerpt)
@@ -227,10 +225,10 @@ def main():
         print("Pushing to LinkedIn...")
         in_success = post_linkedin(linkedin_text)
         
-        # 5. Dispatch to Medium (RPA via Import)
-        print("Pushing to Medium (RPA via Import)...")
+        # 5. Dispatch to Medium (Import + paste polished content)
+        print("Pushing to Medium (Import + AI paste)...")
         try:
-            med_success = push_to_medium(url, title, polished_html)
+            med_success = push_to_medium(url, title, polished_markdown)
         except FatalError as e:
             print(f"FATAL ERROR: {e}")
             sys.exit(1)
