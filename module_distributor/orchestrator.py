@@ -1,6 +1,5 @@
 import os
 import sys
-import time
 import json
 import urllib.request
 import re
@@ -8,12 +7,18 @@ from google import genai
 from medium_import import push_to_medium, FatalError
 from twitter_playwright import post_tweet
 from linkedin_api import post_linkedin
+from deepseek_polish import polish_article
 
 RSS_URL = os.getenv("RSS_URL", "https://smartinfralog.com/index.xml")
 POSTED_URLS_FILE = os.path.join(os.path.dirname(__file__), "posted_urls.txt")
 
-# Gemini Configuration
+# AI Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# URL tracking
+# ──────────────────────────────────────────────────────────────────────────────
 
 def load_posted_urls():
     if not os.path.exists(POSTED_URLS_FILE):
@@ -25,29 +30,28 @@ def append_posted_url(url):
     with open(POSTED_URLS_FILE, "a") as f:
         f.write(f"{url}\n")
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Article fetching
+# ──────────────────────────────────────────────────────────────────────────────
+
 def fetch_article_text(url):
-    """
-    Very basic HTML parsing to extract text content.
-    For a production robust version, Beautifulsoup could be used, but keeping it dependency-light.
-    """
+    """Extract plain text from article URL (for social variant generation)."""
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req) as response:
             html = response.read().decode('utf-8')
-        
-        # Extremely basic text extraction: strip script/style tags, then strip all tags
         text = re.sub(r'<script.*?</script>', '', html, flags=re.DOTALL)
         text = re.sub(r'<style.*?</style>', '', text, flags=re.DOTALL)
         text = re.sub(r'<[^>]+>', ' ', text)
         text = re.sub(r'\s+', ' ', text).strip()
-        
-        # Take first 4000 chars to avoid token limits for context
         return text[:4000]
     except Exception as e:
         print(f"Warning: Failed to fetch text from {url}: {e}")
         return ""
 
 def fetch_article_html(url):
+    """Fetch the article content div HTML for DeepSeek polishing."""
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req) as response:
@@ -62,62 +66,31 @@ def fetch_article_html(url):
         print(f"Warning: Failed to fetch HTML from {url}: {e}")
         return ""
 
-def polish_article_with_gemini(html_content):
-    if not html_content:
-        return ""
-    if not GEMINI_API_KEY:
-        print("GEMINI_API_KEY not set. Cannot polish article.")
-        return html_content
-    
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    
-    system_prompt = """你现在是一个顶级的硅谷技术博主兼 Medium 爆款制造机。你的受众是高级软件工程师、独立开发者和技术极客。
 
-你的任务是将一篇硬核的技术设施/自动化理财博客，润色成符合 Medium 调性的高赞文章。
-
-请严格遵循以下润色规则：
-1. **情绪引入 (The Hook)：** 开头必须直击痛点。用略带自嘲、对重复性体力劳动极度厌恶的语气，讲出你为什么要写这个系统（例如：“我实在受够了每个月打开那个又蠢又慢的 Excel 去算汇率了...”）。
-2. **保留硬核 (Keep it Hardcore)：** 绝对不要为了通俗而删减核心技术细节！保留所有的 Python 脚本、MLOps 概念、无状态(Stateless)架构理念和金融代码。受众喜欢看你秀硬核操作。
-3. **降维打击的类比：** 尝试把生活中的问题，用 IT 基础设施的行话来解释。比如“把个人资产当成微服务来管理”、“给自己的现金流加上高可用架构”。
-4. **排版极客化：** 严格使用 Markdown 格式。使用 Blockquotes (引用) 来标出核心箴言，使用代码块高亮代码，标题要有逻辑性和层次感。
-5. **语言风格：** 英文输出，语气要自信、务实、直截了当 (Direct & Pragmatic)，杜绝毫无意义的客套废话。
-
-非常重要的一点：你的输入是一段原始文章的HTML（或者是纯文本）。请直接输出润色后的Markdown内容，不要输出任何其他的客套话或前言后语。"""
-    
-    try:
-        import markdown as _md_lib
-        response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            contents=[system_prompt + "\n\n" + html_content],
-        )
-        md_content = response.text
-        return md_content  # Return raw Markdown; medium_import will paste it
-    except Exception as e:
-        print(f"Failed to polish article via Gemini: {e}")
-        return ""  # Return empty so fallback uses raw import
+# ──────────────────────────────────────────────────────────────────────────────
+# Social variant generation (Gemini)
+# ──────────────────────────────────────────────────────────────────────────────
 
 def generate_social_variants(title, url, text):
-    """
-    Uses Gemini (3.1 Pro) to generate variants.
-    """
+    """Uses Gemini to generate Twitter + LinkedIn copy."""
     if not GEMINI_API_KEY:
-        print("GEMINI_API_KEY not set. Using fallback dummy text.")
+        print("GEMINI_API_KEY not set. Using fallback text.")
         return {
-            "twitter": f"New post: {title} {url} #BuildInPublic #Python",
-            "linkedin": f"I just published a new article on my blog about: {title}.\n\nCheck it out here: {url}"
+            "twitter": f"New post: {title} #BuildInPublic #Python",
+            "linkedin": f"I just published: {title}\n\n{url}",
         }
 
     client = genai.Client(api_key=GEMINI_API_KEY)
-    
-    system_prompt = """You are a cynical but highly skilled DevOps/Infrastructure engineer who hates repetitive tasks. 
-You run a blog called "Smart Infra Log". You are writing social media promotional copy for your latest blog post.
-
-You must output exactly a JSON object with two keys:
-"twitter": A short, punchy tweet (max 280 chars) summarizing the technical highlight, slightly self-deprecating, ending with the tags #BuildInPublic #Python. DO NOT append the URL.
-"linkedin": A slightly longer, more professional but still authentic post abstracting the engineering philosophy behind the post, ending with the URL.
-
-Do not wrap the JSON in markdown code blocks, just output the raw JSON."""
-
+    system_prompt = (
+        'You are a cynical but highly skilled DevOps/Infrastructure engineer who hates repetitive tasks. '
+        'You run a blog called "Smart Infra Log". '
+        'You must output exactly a JSON object with two keys:\n'
+        '"twitter": A short, punchy tweet (max 280 chars) summarizing the technical highlight, '
+        'slightly self-deprecating, ending with the tags #BuildInPublic #Python. DO NOT append the URL.\n'
+        '"linkedin": A slightly longer, more professional but still authentic post abstracting the '
+        'engineering philosophy behind the post, ending with the URL.\n'
+        'Do not wrap the JSON in markdown code blocks, just output the raw JSON.'
+    )
     user_prompt = f"Title: {title}\nURL: {url}\n\nArticle excerpt:\n{text}"
 
     try:
@@ -125,66 +98,59 @@ Do not wrap the JSON in markdown code blocks, just output the raw JSON."""
             model='gemini-2.0-flash',
             contents=[system_prompt + "\n\n" + user_prompt],
         )
-        
-        result_text = response.text
-        # Clean up any potential markdown formatting from the response
-        result_text = result_text.strip()
+        result_text = response.text.strip()
         if result_text.startswith("```json"):
             result_text = result_text[7:]
         elif result_text.startswith("```"):
             result_text = result_text[3:]
         if result_text.endswith("```"):
             result_text = result_text[:-3]
-            
         return json.loads(result_text.strip())
     except Exception as e:
         print(f"Failed to generate social variants via Gemini: {e}")
-        # Fallback
         return {
             "twitter": f"New post: {title} #BuildInPublic #Python",
-            "linkedin": f"I just published a new article on my blog about: {title}.\n\nCheck it out here: {url}"
+            "linkedin": f"I just published: {title}\n\n{url}",
         }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Main pipeline
+# ──────────────────────────────────────────────────────────────────────────────
 
 def main():
     import xml.etree.ElementTree as ET
     print(f"Fetching RSS feed natively from {RSS_URL}...")
     req = urllib.request.Request(RSS_URL, headers={'User-Agent': 'Mozilla/5.0'})
-    
+
     try:
         with urllib.request.urlopen(req) as response:
             xml_data = response.read()
         root = ET.fromstring(xml_data)
-        
         entries = []
         for item in root.findall('.//item'):
             title_elem = item.find('title')
             link_elem = item.find('link')
             if title_elem is not None and link_elem is not None:
                 entries.append({'title': title_elem.text, 'link': link_elem.text})
-                
     except Exception as e:
-        print(f"Error fetching/parsing native RSS: {e}")
+        print(f"Error fetching/parsing RSS: {e}")
         sys.exit(1)
-        
-    if len(entries) == 0:
-        print("Warning: Feed contains no entries or parsing failed.")
+
+    if not entries:
+        print("Warning: Feed contains no entries.")
         sys.exit(1)
-        
+
     posted_urls = load_posted_urls()
     new_entries = []
-    
     for entry in reversed(entries):
         link = entry.get('link')
         title = entry.get('title')
-        
         if not link:
             continue
-            
-        # Only process actual blog posts, skip pages like Privacy Policy, About, etc.
         if "/posts/" not in link:
             print(f"Skipping non-post page: {title} ({link})")
             continue
-            
         clean_link = link.rstrip('/')
         if clean_link not in posted_urls:
             new_entries.append((clean_link, title))
@@ -194,58 +160,56 @@ def main():
         return
 
     print(f"Found {len(new_entries)} new article(s) to distribute.")
-    
     success_count = 0
+
     for url, title in new_entries:
         print(f"\n--- Processing: {title} ({url}) ---")
-        
-        # 1. Fetch text for AI variants
+
+        # 1. Fetch content
         text_excerpt = fetch_article_text(url)
         html_content = fetch_article_html(url)
-        
-        # 1.5 Polish article with Gemini (returns Markdown)
-        print("Polishing article with Gemini...")
-        polished_markdown = polish_article_with_gemini(html_content)
-        # polished_markdown empty means fallback: Medium will use the raw import
 
-        # 2. AI Gen
+        # 2. Polish article with DeepSeek (returns Markdown)
+        print("Polishing article with DeepSeek...")
+        polished_markdown = polish_article(html_content)
+        # Empty string = DeepSeek skipped/failed; Medium keeps raw imported content
+
+        # 3. Generate social copy with Gemini
         print("Generating AI Social Variants...")
         variants = generate_social_variants(title, url, text_excerpt)
         twitter_text = variants.get("twitter", "")
         linkedin_text = variants.get("linkedin", "")
-        
-        # 3. Dispatch to X
+
+        # 4. Post to X (Twitter) via Playwright
         print("Pushing to X (Twitter)...")
         if twitter_text:
             x_success = post_tweet(f"{twitter_text}\n\n{url}")
         else:
             x_success = False
-        
-        # 4. Dispatch to LinkedIn
+
+        # 5. Post to LinkedIn
         print("Pushing to LinkedIn...")
         in_success = post_linkedin(linkedin_text)
-        
-        # 5. Dispatch to Medium (Import + paste polished content)
+
+        # 6. Push to Medium via undetected_chromedriver Import + paste
         print("Pushing to Medium (Import + AI paste)...")
         try:
             med_success = push_to_medium(url, title, polished_markdown)
         except FatalError as e:
             print(f"FATAL ERROR: {e}")
             sys.exit(1)
-            
-        # 6. Assess Transaction
+
+        # 7. Record success
         if med_success:
-            # Even if X or LinkedIn failed, if Medium succeeded we consider it posted 
-            # because Medium RPA is the heaviest and we don't want to duplicate drafts.
-            # In a true event-driven system, we'd have independent state for each platform.
             print(f"Article {url} successfully pushed to primary channels.")
             append_posted_url(url)
             success_count += 1
         else:
             print(f"Stopping execution due to failure on {url}.")
             sys.exit(1)
-            
+
     print(f"\nSuccessfully distributed {success_count} articles.")
+
 
 if __name__ == "__main__":
     main()
