@@ -339,10 +339,4 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
             driver.quit()
         except Exception:
             pass
-        # Clean up auth file
-        auth_file = os.path.join(os.path.dirname(__file__), "medium_auth.json")
-        if os.path.exists(auth_file):
-            try:
-                os.remove(auth_file)
-            except Exception:
-                pass
+        # No auth file cleanup needed; handled by CI environment
