@@ -73,25 +73,14 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           LINKEDIN_TOKEN: ${{ secrets.LINKEDIN_TOKEN }}
           LINKEDIN_PERSON_URN: ${{ secrets.LINKEDIN_PERSON_URN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DISPLAY: ':99'
         run: |
           Xvfb :99 -screen 0 1280x800x24 &
           sleep 2
           cd module_distributor
           python orchestrator.py
-
-      - name: Commit posted URLs
-        if: always()
-        run: |
-          git config --global user.name 'GitHub Actions'
-          git config --global user.email 'actions@github.com'
-          git add module_distributor/posted_urls.txt
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: update posted URLs [skip ci]"
-            git push
-          else
-            echo "No changes to commit."
-          fi
 
       - name: Upload debug screenshots
         if: failure()

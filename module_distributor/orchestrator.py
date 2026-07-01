@@ -10,26 +10,48 @@ from linkedin_api import post_linkedin
 from deepseek_polish import polish_article
 
 RSS_URL = os.getenv("RSS_URL", "https://smartinfralog.com/index.xml")
-POSTED_URLS_FILE = os.path.join(os.path.dirname(__file__), "posted_urls.txt")
-
-# AI Configuration
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+# Supabase Configuration
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+def get_supabase_client():
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        print("Warning: SUPABASE_URL or SUPABASE_KEY not set! Cannot track posted URLs robustly.")
+        return None
+    try:
+        from supabase import create_client, Client
+        return create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as e:
+        print(f"Error initializing Supabase client: {e}")
+        return None
 
 # ──────────────────────────────────────────────────────────────────────────────
 # URL tracking
 # ──────────────────────────────────────────────────────────────────────────────
 
 def load_posted_urls():
-    if not os.path.exists(POSTED_URLS_FILE):
+    client = get_supabase_client()
+    if not client:
         return set()
-    with open(POSTED_URLS_FILE, "r") as f:
-        return set(line.strip().rstrip('/') for line in f if line.strip() and not line.startswith("#"))
+    try:
+        response = client.table("posted_articles").select("url").execute()
+        return set(row["url"].strip().rstrip('/') for row in response.data)
+    except Exception as e:
+        print(f"Error fetching from Supabase: {e}")
+        return set()
 
 def append_posted_url(url):
-    with open(POSTED_URLS_FILE, "a") as f:
-        f.write(f"{url}\n")
+    client = get_supabase_client()
+    if not client:
+        return
+    try:
+        client.table("posted_articles").insert({"url": url}).execute()
+        print(f"Recorded {url} to Supabase posted_articles table.")
+    except Exception as e:
+        print(f"Error inserting into Supabase: {e}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────

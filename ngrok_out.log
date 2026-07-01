@@ -1,0 +1,37 @@
+NAME:
+  tcp - start a TCP tunnel
+
+USAGE:
+  ngrok tcp [address:port | port] [flags]
+
+DESCRIPTION: 
+  Starts a tunnel which forwards all TCP traffic on a public port to a local
+  address. This is extremely useful for exposing services that run non-HTTP
+  traffic (ssh, sip, rdp, game servers, etc).
+
+  A TCP tunnel binds a public address on the remote ngrok server. Any
+  services which require a stable public address should use the
+  --remote-addr option. ngrok requires that you reserve a TCP tunnel
+  address for your account before you can use it.
+
+TERMS OF SERVICE: https://ngrok.com/tos
+
+EXAMPLES: 
+  # forward a port to your local ssh server
+  ngrok tcp 22
+
+  # expose an RDP server on a specific public address that you reserved
+  ngrok tcp --remote-addr=1.tcp.ngrok.io:27210 3389
+
+OPTIONS:
+      --authtoken string     ngrok.com authtoken identifying a user
+      --cidr-allow strings   reject connections that do not match the given CIDRs
+      --cidr-deny strings    reject connections that match the given CIDRs
+      --config strings       path to config files; they are merged if multiple
+  -h, --help                 help for tcp
+      --log string           path to log file, 'stdout', 'stderr' or 'false' (default "false")
+      --log-format string    log record format: 'term', 'logfmt', 'json' (default "term")
+      --log-level string     logging level: 'debug', 'info', 'warn', 'error', 'crit' (default "info")
+      --proxy-proto string   version of proxy proto to use with this tunnel, empty if not using
+      --region string        ngrok server region [us, eu, au, ap, sa, jp, in] (default "us")
+      --remote-addr string   bind remote address (requires you reserve an address)

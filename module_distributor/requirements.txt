@@ -6,3 +6,5 @@ markdown
 playwright>=1.44.0
 undetected-chromedriver>=3.5.0
 selenium>=4.0.0
+supabase>=2.3.0  
+ 

@@ -1,0 +1,2 @@
+authenticated as anonymous user
+Only HTTP and TLS forwards are currently supported.

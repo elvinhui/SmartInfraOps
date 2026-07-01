@@ -1,0 +1,12 @@
+
+ERROR:  authentication failed: The authtoken you specified is properly formed, but it is invalid.
+ERROR:  Your authtoken: 3Fd4Hng6G0P6T9NkaT4HRHqyPgU_21JgyFDHNqlBcw6mvu3ez
+ERROR:  This usually happens when:
+ERROR:      - You reset your authtoken
+ERROR:      - Your authtoken was for a team account that you were removed from
+ERROR:      - You are using ngrok link and this credential was explicitly revoked
+ERROR:  Go to your ngrok dashboard and double check that your authtoken is correct:
+ERROR:  https://dashboard.ngrok.com/get-started/your-authtoken
+ERROR:  
+ERROR:  ERR_NGROK_107
+ERROR:  

@@ -1,0 +1,15 @@
+app = 'smartinfra-proxy'
+primary_region = 'sin'
+
+[build]
+
+[http_service]
+  internal_port = 8888
+  force_https = true
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
