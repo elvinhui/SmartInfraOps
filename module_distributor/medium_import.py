@@ -160,9 +160,8 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
                     var rect = inputs[i].getBoundingClientRect();
                     if (rect.width > 0 && rect.height > 0) {
                         inputs[i].focus();
-                        inputs[i].value = arguments[0];
-                        var tracker = inputs[i]._valueTracker;
-                        if (tracker) { tracker.setValue(''); }
+                        var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                        nativeInputValueSetter.call(inputs[i], arguments[0]);
                         inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
                         inputs[i].dispatchEvent(new Event('change', { bubbles: true }));
                         found = true;
@@ -175,9 +174,10 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
             time.sleep(2)
 
         if not found_input:
+            driver.save_screenshot("module_distributor/error_medium_no_input.png")
             raise Exception("Failed to find URL input field on Medium import page.")
 
-        time.sleep(1)
+        time.sleep(2)
 
         # ── Step 4: Click the Import button ───────────────────────────────
         print("Clicking Import button...")
@@ -186,6 +186,9 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
             for (var i = 0; i < btns.length; i++) {
                 var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
                 if (txt.includes('import')) {
+                    if (btns[i].disabled || btns[i].hasAttribute('aria-disabled') && btns[i].getAttribute('aria-disabled') === 'true') {
+                        continue;
+                    }
                     btns[i].click();
                     return true;
                 }
@@ -193,7 +196,8 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
             return false;
         """)
         if not clicked:
-            raise Exception("Failed to find Import button.")
+            driver.save_screenshot("module_distributor/error_medium_no_import_btn.png")
+            raise Exception("Failed to find or click enabled Import button. React state might not have updated.")
 
         # ── Step 5: Wait for "See your story" / redirect to editor ────────
         print("Waiting for import to complete...")
@@ -216,13 +220,21 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
                 print("Clicked 'See your story'.")
                 time.sleep(5)
                 break
+            # Medium might auto-redirect to the editor now
+            if "/edit" in driver.current_url or "/p/" in driver.current_url and driver.current_url != "https://medium.com/p/import":
+                print("Auto-redirected to editor.")
+                see_story_clicked = True
+                break
 
         if not see_story_clicked:
-            print("'See your story' button not found; checking current URL...")
+            driver.save_screenshot("module_distributor/error_medium_no_see_story.png")
+            raise Exception(f"Did not transition to editor. Current URL: {driver.current_url}")
 
         # Wait for editor to fully load
-        time.sleep(5)
+        time.sleep(8)
         print(f"Current URL after import: {driver.current_url}")
+        if "/edit" not in driver.current_url and "/p/" not in driver.current_url:
+            raise Exception("URL does not look like the Medium editor.")
 
         # ── Step 6: Paste AI-polished content (if provided) ───────────────
         if polished_markdown:
@@ -237,35 +249,37 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
                 var editors = document.querySelectorAll('[contenteditable="true"]');
                 if (editors.length > 0) {
                     editors[0].focus();
-                    return editors.length;
+                    return true;
                 }
-                return 0;
+                return false;
             """)
             if not focused:
-                print("Warning: Could not find Medium editor. Skipping paste.")
-            else:
-                time.sleep(0.5)
-                actions = ActionChains(driver)
-                # Select all and delete
-                actions.key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
-                time.sleep(0.5)
-                actions = ActionChains(driver)
-                actions.send_keys(Keys.DELETE).perform()
-                time.sleep(0.5)
+                driver.save_screenshot("module_distributor/error_medium_no_editor.png")
+                raise Exception("Could not find Medium editor contenteditable.")
+            
+            time.sleep(1)
+            actions = ActionChains(driver)
+            # Select all and delete
+            actions.key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
+            time.sleep(1)
+            actions = ActionChains(driver)
+            actions.send_keys(Keys.DELETE).perform()
+            time.sleep(1)
 
-                # Type title on first line
-                actions = ActionChains(driver)
-                actions.send_keys(title).perform()
-                time.sleep(0.3)
-                actions = ActionChains(driver)
-                actions.send_keys(Keys.RETURN).perform()
-                time.sleep(0.3)
+            # Type title on first line
+            actions = ActionChains(driver)
+            actions.send_keys(title).perform()
+            time.sleep(0.5)
+            actions = ActionChains(driver)
+            actions.send_keys(Keys.RETURN).perform()
+            time.sleep(0.5)
 
-                # Paste polished content
-                actions = ActionChains(driver)
-                actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
-                time.sleep(4)
-                print("Polished content pasted.")
+            # Paste polished content
+            actions = ActionChains(driver)
+            actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
+            time.sleep(5)
+            print("Polished content pasted.")
+            driver.save_screenshot("module_distributor/debug_after_paste.png")
 
         # ── Step 7: Publish ───────────────────────────────────────────────
         print("Waiting for Publish button...")
@@ -288,7 +302,8 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
             time.sleep(2)
 
         if not publish_clicked:
-            print("Warning: Publish button not found after waiting.")
+            driver.save_screenshot("module_distributor/error_medium_no_publish.png")
+            raise Exception("Publish button not found or not enabled after waiting.")
 
         time.sleep(5)
 
