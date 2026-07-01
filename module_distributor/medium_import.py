@@ -165,14 +165,24 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
             """)
             if input_elem:
                 try:
-                    input_elem.click()
+                    driver.execute_script("arguments[0].focus(); arguments[0].click();", input_elem)
                     time.sleep(0.5)
-                    input_elem.clear()
-                    input_elem.send_keys(canonical_url)
+                    try:
+                        input_elem.clear()
+                        input_elem.send_keys(canonical_url)
+                    except Exception as selenium_err:
+                        print(f"Selenium send_keys failed ({selenium_err}), falling back to JS injection...")
+                        driver.execute_script("""
+                            arguments[0].innerText = arguments[1];
+                            arguments[0].value = arguments[1];
+                            arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+                            arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+                        """, input_elem, canonical_url)
+                    
                     found_input = True
                     break
                 except Exception as e:
-                    print(f"Error sending keys to input: {e}")
+                    print(f"Error interacting with input: {e}")
             time.sleep(2)
 
         if not found_input:
