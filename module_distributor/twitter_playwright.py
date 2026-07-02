@@ -54,6 +54,12 @@ def post_tweet(text: str) -> bool:
     Posts a tweet via Playwright stealth Chromium.
     Returns True on success, False on failure.
     """
+    proxy_server = os.getenv("PROXY_SERVER")
+    if proxy_server:
+        print(f"Using SOCKS5 proxy: {proxy_server.split('@')[-1]}")
+    else:
+        print("Warning: No PROXY_SERVER set. Using direct connection (cloud IP).")
+
     cookies = _load_cookies()
     if not cookies:
         print("X (Twitter) cookies not configured. Skipping tweet.")
@@ -69,7 +75,9 @@ def post_tweet(text: str) -> bool:
                 "--disable-blink-features=AutomationControlled",
             ],
         )
+        proxy_config = {"server": proxy_server} if proxy_server else None
         context = browser.new_context(
+            proxy=proxy_config,
             user_agent=(
                 "Mozilla/5.0 (X11; Linux x86_64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "

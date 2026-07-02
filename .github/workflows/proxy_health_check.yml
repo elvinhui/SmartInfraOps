@@ -1,0 +1,71 @@
+name: Proxy Health Check (Phone → Tailscale → GHA)
+
+on:
+  schedule:
+    # Every 6 hours — lightweight check
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Connect to Tailscale mesh
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Test SOCKS5 proxy reachability
+        env:
+          PROXY_TAILSCALE_IP: ${{ secrets.PROXY_TAILSCALE_IP }}
+          SOCKS_USER: ${{ secrets.SOCKS_USER }}
+          SOCKS_PASS: ${{ secrets.SOCKS_PASS }}
+        run: |
+          echo "=== Proxy Health Check ==="
+          PROXY="socks5h://${SOCKS_USER}:${SOCKS_PASS}@${PROXY_TAILSCALE_IP}:1080"
+
+          # Test 1: Basic connectivity
+          echo "[Test 1] Basic SOCKS5 connectivity..."
+          HTTP_CODE=$(curl -x "$PROXY" -o /dev/null -s -w "%{http_code}" \
+            --connect-timeout 15 --max-time 30 https://httpbin.org/ip)
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::SOCKS5 proxy unreachable (HTTP $HTTP_CODE)"
+            echo "Possible causes:"
+            echo "  - Phone is offline or Termux is not running"
+            echo "  - gost process crashed (watchdog should restart it)"
+            echo "  - Tailscale disconnected"
+            exit 1
+          fi
+          echo "✅ Proxy is reachable."
+
+          # Test 2: Verify exit IP is NOT a cloud IP
+          echo "[Test 2] Checking exit IP..."
+          EXIT_IP=$(curl -x "$PROXY" -s --connect-timeout 15 https://httpbin.org/ip | jq -r '.origin')
+          GHA_IP=$(curl -s https://httpbin.org/ip | jq -r '.origin')
+
+          echo "Exit IP (via proxy):  $EXIT_IP"
+          echo "GHA IP (direct):      $GHA_IP"
+
+          if [ "$EXIT_IP" = "$GHA_IP" ]; then
+            echo "::error::Proxy not working — exit IP matches GHA IP!"
+            exit 1
+          fi
+          echo "✅ Proxy is working. Traffic exits via residential/mobile IP."
+
+          # Test 3: Can we reach X.com?
+          echo "[Test 3] Testing X.com accessibility..."
+          X_CODE=$(curl -x "$PROXY" -o /dev/null -s -w "%{http_code}" \
+            --connect-timeout 15 --max-time 30 https://x.com)
+          echo "X.com HTTP status: $X_CODE"
+
+          if [ "$X_CODE" -ge 400 ]; then
+            echo "::warning::X.com returned HTTP $X_CODE via proxy"
+          else
+            echo "✅ X.com is accessible via proxy."
+          fi
+
+          echo ""
+          echo "=== Health Check PASSED ==="
