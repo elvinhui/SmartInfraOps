@@ -19,14 +19,14 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 def get_supabase_client():
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("Warning: SUPABASE_URL or SUPABASE_KEY not set! Cannot track posted URLs robustly.")
-        return None
+        print("FATAL ERROR: SUPABASE_URL or SUPABASE_KEY not set! Cannot track posted URLs robustly.")
+        sys.exit(1)
     try:
         from supabase import create_client, Client
         return create_client(SUPABASE_URL, SUPABASE_KEY)
     except Exception as e:
-        print(f"Error initializing Supabase client: {e}")
-        return None
+        print(f"FATAL ERROR initializing Supabase client: {e}")
+        sys.exit(1)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # URL tracking
@@ -34,24 +34,23 @@ def get_supabase_client():
 
 def load_posted_urls():
     client = get_supabase_client()
-    if not client:
-        return set()
     try:
         response = client.table("posted_articles").select("url").execute()
         return set(row["url"].strip().rstrip('/') for row in response.data)
     except Exception as e:
-        print(f"Error fetching from Supabase: {e}")
-        return set()
+        print(f"FATAL ERROR fetching from Supabase: {e}")
+        print("Aborting to prevent duplicate posting.")
+        sys.exit(1)
 
 def append_posted_url(url):
     client = get_supabase_client()
-    if not client:
-        return
     try:
         client.table("posted_articles").insert({"url": url}).execute()
         print(f"Recorded {url} to Supabase posted_articles table.")
     except Exception as e:
-        print(f"Error inserting into Supabase: {e}")
+        print(f"FATAL ERROR inserting into Supabase: {e}")
+        print("Aborting pipeline to prevent inconsistencies.")
+        sys.exit(1)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
