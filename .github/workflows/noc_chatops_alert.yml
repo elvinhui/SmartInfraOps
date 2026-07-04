@@ -31,4 +31,6 @@ jobs:
           UMAMI_PASSWORD: ${{ secrets.UMAMI_PASSWORD }}
           UMAMI_WEBSITE_ID: ${{ secrets.UMAMI_WEBSITE_ID }}
           NOC_WEBHOOK_URL: ${{ secrets.NOC_WEBHOOK_URL }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO: ${{ github.repository }}
         run: python module_noc_alerts/main.py
