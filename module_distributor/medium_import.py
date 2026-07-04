@@ -348,44 +348,70 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             print("Polished content pasted.")
             driver.save_screenshot("module_distributor/debug_after_paste.png")
 
-        # ── Step 6b: Clean up empty paragraphs in the editor ──────────────
-        # Medium's import engine and paste handler often inject empty <p>, <br>,
-        # and whitespace-only elements below headings, causing huge vertical gaps.
-        print("Cleaning up empty paragraphs in editor...")
+        # ── Step 6b: Clean up empty paragraphs & code blocks in editor ────
+        # Medium's import/paste engine injects empty <p>, <pre>, <br>, and
+        # whitespace-only elements below headings, causing huge vertical gaps
+        # and phantom empty code blocks.
+        print("Cleaning up empty elements in editor...")
         removed = driver.execute_script("""
             var editor = document.querySelector('[contenteditable="true"]');
             if (!editor) return 0;
             var removed = 0;
 
-            // 1. Remove completely empty <p> tags (no text, no meaningful children)
-            var paras = editor.querySelectorAll('p');
-            for (var i = paras.length - 1; i >= 0; i--) {
-                var p = paras[i];
-                var text = (p.textContent || '').trim();
-                // Empty or contains only whitespace/zero-width chars
-                if (text === '' || text === '\\u200b' || text === '\\uFEFF') {
-                    // Don't remove if it contains an image, iframe, or figure
-                    if (!p.querySelector('img, iframe, figure, video, pre, code')) {
-                        p.remove();
-                        removed++;
-                    }
+            function isEmpty(el) {
+                var text = (el.textContent || '').replace(/[\\u200b\\uFEFF\\s]/g, '');
+                return text === '';
+            }
+
+            function hasMeaningfulChild(el) {
+                return !!el.querySelector('img, iframe, figure, video');
+            }
+
+            // 1. Remove empty <pre> / code blocks (the phantom gray boxes)
+            var pres = editor.querySelectorAll('pre');
+            for (var i = pres.length - 1; i >= 0; i--) {
+                if (isEmpty(pres[i]) && !hasMeaningfulChild(pres[i])) {
+                    pres[i].remove();
+                    removed++;
                 }
             }
 
-            // 2. Remove stray <br> elements that are direct children of the editor
+            // 2. Remove completely empty <p> tags
+            var paras = editor.querySelectorAll('p');
+            for (var i = paras.length - 1; i >= 0; i--) {
+                if (isEmpty(paras[i]) && !hasMeaningfulChild(paras[i])) {
+                    paras[i].remove();
+                    removed++;
+                }
+            }
+
+            // 3. Remove stray <br> elements that are direct children of the editor
             var brs = editor.querySelectorAll(':scope > br');
             for (var i = brs.length - 1; i >= 0; i--) {
                 brs[i].remove();
                 removed++;
             }
 
-            // 3. Remove empty <div> wrappers that have no meaningful content
-            var divs = editor.querySelectorAll('div:not([class])');
+            // 4. Remove empty <div> wrappers with no meaningful content
+            var divs = editor.querySelectorAll('div');
             for (var i = divs.length - 1; i >= 0; i--) {
                 var d = divs[i];
-                var text = (d.textContent || '').trim();
-                if ((text === '' || text === '\\u200b') && !d.querySelector('img, iframe, figure, video, pre, code, h1, h2, h3, h4, p')) {
+                if (isEmpty(d) && !hasMeaningfulChild(d) && !d.querySelector('h1,h2,h3,h4,p,pre,code,ul,ol,blockquote')) {
                     d.remove();
+                    removed++;
+                }
+            }
+
+            // 5. Specifically remove empty siblings right after headings
+            var headings = editor.querySelectorAll('h1, h2, h3, h4');
+            for (var i = 0; i < headings.length; i++) {
+                var next = headings[i].nextElementSibling;
+                while (next && isEmpty(next) && !hasMeaningfulChild(next) &&
+                       !next.matches('h1,h2,h3,h4,ul,ol,blockquote') &&
+                       !(next.matches('pre') && !isEmpty(next))) {
+                    var toRemove = next;
+                    next = next.nextElementSibling;
+                    toRemove.remove();
                     removed++;
                 }
             }
