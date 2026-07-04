@@ -348,6 +348,54 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             print("Polished content pasted.")
             driver.save_screenshot("module_distributor/debug_after_paste.png")
 
+        # ── Step 6b: Clean up empty paragraphs in the editor ──────────────
+        # Medium's import engine and paste handler often inject empty <p>, <br>,
+        # and whitespace-only elements below headings, causing huge vertical gaps.
+        print("Cleaning up empty paragraphs in editor...")
+        removed = driver.execute_script("""
+            var editor = document.querySelector('[contenteditable="true"]');
+            if (!editor) return 0;
+            var removed = 0;
+
+            // 1. Remove completely empty <p> tags (no text, no meaningful children)
+            var paras = editor.querySelectorAll('p');
+            for (var i = paras.length - 1; i >= 0; i--) {
+                var p = paras[i];
+                var text = (p.textContent || '').trim();
+                // Empty or contains only whitespace/zero-width chars
+                if (text === '' || text === '\\u200b' || text === '\\uFEFF') {
+                    // Don't remove if it contains an image, iframe, or figure
+                    if (!p.querySelector('img, iframe, figure, video, pre, code')) {
+                        p.remove();
+                        removed++;
+                    }
+                }
+            }
+
+            // 2. Remove stray <br> elements that are direct children of the editor
+            var brs = editor.querySelectorAll(':scope > br');
+            for (var i = brs.length - 1; i >= 0; i--) {
+                brs[i].remove();
+                removed++;
+            }
+
+            // 3. Remove empty <div> wrappers that have no meaningful content
+            var divs = editor.querySelectorAll('div:not([class])');
+            for (var i = divs.length - 1; i >= 0; i--) {
+                var d = divs[i];
+                var text = (d.textContent || '').trim();
+                if ((text === '' || text === '\\u200b') && !d.querySelector('img, iframe, figure, video, pre, code, h1, h2, h3, h4, p')) {
+                    d.remove();
+                    removed++;
+                }
+            }
+
+            return removed;
+        """)
+        print(f"Removed {removed} empty elements from editor.")
+        time.sleep(2)
+        driver.save_screenshot("module_distributor/debug_after_cleanup.png")
+
         # ── Step 7: Publish ───────────────────────────────────────────────
         print("Waiting for Publish button...")
         publish_clicked = False
