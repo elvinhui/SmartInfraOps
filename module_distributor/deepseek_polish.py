@@ -5,6 +5,7 @@ Called by orchestrator.py to rewrite raw article HTML into polished Markdown
 suitable for pasting into the Medium editor.
 """
 import os
+import re
 import openai
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
@@ -61,6 +62,15 @@ def polish_article(html_content: str) -> str:
             temperature=0.7,
         )
         md = response.choices[0].message.content.strip()
+        
+        # Programmatic Post-Processing to Guarantee No Extra Space
+        # 1. Remove sneaky HTML line breaks the AI might use
+        md = re.sub(r'<br\s*/?>', '', md, flags=re.IGNORECASE)
+        # 2. Strip trailing whitespaces on every line
+        md = re.sub(r'[ \t]+\n', '\n', md)
+        # 3. Replace 3 or more consecutive newlines with exactly 2 (standard markdown paragraph separation)
+        md = re.sub(r'\n{3,}', '\n\n', md)
+        
         print("Article polished successfully via DeepSeek.")
         return md
     except Exception as exc:
