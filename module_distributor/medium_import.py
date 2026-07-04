@@ -457,33 +457,50 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             
         print(f"Adding topics: {topics}...")
         try:
-            topic_input = driver.execute_script("""
-                var input = document.querySelector('input[placeholder="Add a topic..."]') || 
-                            document.querySelector('input[role="combobox"][aria-controls="tagMultiSelectMenu"]');
-                if (input) return input;
-                
-                var inputs = document.querySelectorAll('input');
-                for(var i=0; i<inputs.length; i++) {
-                    if(inputs[i].placeholder && (inputs[i].placeholder.toLowerCase().includes('topic') || inputs[i].placeholder.toLowerCase().includes('tag'))) {
-                        return inputs[i];
+            # The topic combobox only appears after Medium's publish modal fully renders.
+            # We must retry until it shows up in the DOM.
+            topic_input = None
+            for attempt in range(15):
+                topic_input = driver.execute_script("""
+                    // Primary: exact match from DOM inspection
+                    var el = document.querySelector('input[role="combobox"][aria-controls="tagMultiSelectMenu"]');
+                    if (el) return el;
+                    
+                    // Secondary: placeholder match
+                    el = document.querySelector('input[placeholder="Add a topic..."]');
+                    if (el) return el;
+                    
+                    // Tertiary: broad scan
+                    var inputs = document.querySelectorAll('input');
+                    for (var i = 0; i < inputs.length; i++) {
+                        var ph = (inputs[i].placeholder || '').toLowerCase();
+                        if (ph.includes('topic') || ph.includes('tag')) {
+                            return inputs[i];
+                        }
                     }
-                }
-                return null;
-            """)
+                    return null;
+                """)
+                if topic_input:
+                    print(f"Found topic input on attempt {attempt + 1}.")
+                    break
+                time.sleep(1)
             
             if topic_input:
-                time.sleep(1)
-                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'}); arguments[0].focus(); arguments[0].click();", topic_input)
+                driver.save_screenshot("module_distributor/debug_topic_input_found.png")
+                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", topic_input)
+                time.sleep(0.5)
+                driver.execute_script("arguments[0].focus(); arguments[0].click();", topic_input)
                 time.sleep(random.uniform(1.0, 1.5))
                 
                 for topic in topics:
                     human_typing(topic_input, topic)
-                    time.sleep(random.uniform(2.0, 3.0)) # Wait for autocomplete suggestions
+                    time.sleep(random.uniform(2.0, 3.0))  # Wait for autocomplete suggestions
                     topic_input.send_keys(Keys.RETURN)
                     time.sleep(random.uniform(0.8, 1.5))
                 print("Topics added successfully.")
             else:
-                print("Topic input field not found.")
+                driver.save_screenshot("module_distributor/error_topic_not_found.png")
+                print("Topic input field not found after 15 attempts.")
         except Exception as e:
             print(f"Warning: Failed to add topics: {e}")
 
