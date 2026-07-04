@@ -7,7 +7,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-DRY_RUN = True  # Set to False to actually delete stories
+DRY_RUN = False  # Set to False to actually delete stories
 
 def load_cookies():
     auth_file = os.path.join(os.path.dirname(__file__), "medium_auth.json")
