@@ -265,7 +265,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                 time.sleep(5)
                 break
             # Medium might auto-redirect to the editor now
-            if "/edit" in driver.current_url or "/p/" in driver.current_url and driver.current_url != "https://medium.com/p/import":
+            if "/edit" in driver.current_url or ("/p/" in driver.current_url and "import" not in driver.current_url):
                 print("Auto-redirected to editor.")
                 see_story_clicked = True
                 break
@@ -277,7 +277,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
         # Wait for editor to fully load
         time.sleep(8)
         print(f"Current URL after import: {driver.current_url}")
-        if "/edit" not in driver.current_url and "/p/" not in driver.current_url:
+        if "/edit" not in driver.current_url and ("/p/" not in driver.current_url or "import" in driver.current_url):
             raise Exception("URL does not look like the Medium editor.")
 
         # ── Step 6: Paste AI-polished content (if provided) ───────────────
