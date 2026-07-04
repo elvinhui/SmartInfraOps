@@ -186,7 +186,13 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
         found_input = False
         for _ in range(15):
             input_elem = driver.execute_script("""
-                var inputs = document.querySelectorAll('.js-importUrl, [data-default-value*="yoursite"], div[contenteditable="true"], input');
+                // Exact target based on Medium DOM
+                var exact = document.querySelector('.js-importUrl, [data-default-value*="yoursite"]');
+                if (exact) {
+                    return exact;
+                }
+                
+                var inputs = document.querySelectorAll('div[contenteditable="true"], input');
                 for (var i = 0; i < inputs.length; i++) {
                     var rect = inputs[i].getBoundingClientRect();
                     if (rect.width > 0 && rect.height > 0 && rect.top > 100) {
@@ -197,16 +203,27 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             """)
             if input_elem:
                 try:
-                    driver.execute_script("arguments[0].focus(); arguments[0].click();", input_elem)
-                    time.sleep(0.5)
+                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'}); arguments[0].focus(); arguments[0].click();", input_elem)
+                    time.sleep(1)
+                    
                     try:
-                        input_elem.clear()
+                        # .clear() throws InvalidElementStateException on contenteditable divs
+                        if input_elem.tag_name.lower() == 'input':
+                            input_elem.clear()
+                        else:
+                            actions = ActionChains(driver)
+                            actions.key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).send_keys(Keys.DELETE).perform()
+                            time.sleep(0.5)
+                        
                         human_typing(input_elem, canonical_url)
                     except Exception as selenium_err:
                         print(f"Selenium send_keys failed ({selenium_err}), falling back to JS injection...")
                         driver.execute_script("""
-                            arguments[0].innerText = arguments[1];
-                            arguments[0].value = arguments[1];
+                            if (arguments[0].tagName.toLowerCase() === 'div') {
+                                arguments[0].innerHTML = '<p>' + arguments[1] + '</p>';
+                            } else {
+                                arguments[0].value = arguments[1];
+                            }
                             arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
                             arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
                         """, input_elem, canonical_url)
