@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import subprocess
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -29,8 +30,19 @@ def build_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1280,800")
-    # Using headless=False to evade bot detection
-    driver = uc.Chrome(options=options, version_main=149, headless=False)
+    
+    # Use headless if no display is available (e.g. CI / SSH)
+    import os
+    if not os.environ.get("DISPLAY"):
+        options.add_argument("--headless=new")
+    
+    # Set page load strategy to eager so it doesn't wait for all assets (like trackers)
+    options.page_load_strategy = 'eager'
+    
+    # Let undetected_chromedriver auto-detect Chrome version
+    driver = uc.Chrome(options=options)
+    driver.set_page_load_timeout(60)
+    driver.set_script_timeout(30)
     return driver
 
 def get_duplicates_on_page(driver):
@@ -38,14 +50,20 @@ def get_duplicates_on_page(driver):
     Scrolls down and returns a dictionary of duplicate story titles on the current page.
     Returns: { "lowercase title": count } (only where count > 1)
     """
-    last_height = driver.execute_script("return document.body.scrollHeight")
-    while True:
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(2)
-        new_height = driver.execute_script("return document.body.scrollHeight")
-        if new_height == last_height:
-            break
-        last_height = new_height
+    try:
+        last_height = driver.execute_script("return document.body.scrollHeight")
+        scroll_attempts = 0
+        while scroll_attempts < 30:
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(2)
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                break
+            last_height = new_height
+            scroll_attempts += 1
+            print(f"Scrolled {scroll_attempts} times, new height: {new_height}", flush=True)
+    except Exception as e:
+        print(f"Warning: Scrolling interrupted (maybe script timeout): {e}", flush=True)
         
     titles = driver.execute_script("""
         var found = [];
@@ -72,107 +90,262 @@ def get_duplicates_on_page(driver):
         
     return {t: c for t, c in counts.items() if c > 1}
 
+_debug_dumped = False
+
 def delete_one_instance(driver, title):
     """
     Finds one story matching the title, clicks its More options, clicks Delete story, and confirms.
     Returns True if successfully deleted, False otherwise.
     """
-    # 1. Open dropdown
-    opened = driver.execute_script("""
+    from selenium.webdriver.common.action_chains import ActionChains
+    
+    # Step 1: Find the story heading, scroll to it, and hover to reveal the 3-dots button
+    heading_index = driver.execute_script("""
         var titleToMatch = arguments[0];
-        var headings = document.querySelectorAll('h2, h3');
+        var headings = Array.from(document.querySelectorAll('h2, h3'));
         for (var i = 0; i < headings.length; i++) {
             var t = (headings[i].innerText || headings[i].textContent || '').trim().toLowerCase();
             if (t === titleToMatch) {
-                // Traverse up to find a container (usually an 'article' or a row div)
-                var container = headings[i];
-                for(var j=0; j<6; j++) { // go up to 6 levels
-                    if(container.parentElement) container = container.parentElement;
-                }
-                
-                // Find the dropdown button inside this container
-                var btns = container.querySelectorAll('button');
-                for (var b = 0; b < btns.length; b++) {
-                    var aria = btns[b].getAttribute('aria-label') || '';
-                    if (aria.toLowerCase().includes('more') || btns[b].innerHTML.includes('circle')) {
-                        btns[b].scrollIntoView({behavior: 'smooth', block: 'center'});
-                        btns[b].click();
+                headings[i].scrollIntoView({behavior: 'smooth', block: 'center'});
+                return i;
+            }
+        }
+        return -1;
+    """, title)
+    
+    if heading_index == -1:
+        print(f"    [-] Could not find heading for: {title}", flush=True)
+        return False
+    
+    # Hover over the heading to trigger the story row's :hover state and reveal the 3-dots
+    time.sleep(0.5)
+    try:
+        headings = driver.find_elements(By.CSS_SELECTOR, "h2, h3")
+        target_heading = headings[heading_index]
+        ActionChains(driver).move_to_element(target_heading).pause(1.0).perform()
+        print(f"    [*] Hovering over heading (index {heading_index})", flush=True)
+    except Exception as e:
+        print(f"    [WARN] Could not hover heading: {e}", flush=True)
+    
+    # Step 2: Find the 3-dots button, force it visible, and dispatch proper click events
+    opened = driver.execute_script("""
+        var titleToMatch = arguments[0];
+        var allButtons = Array.from(document.querySelectorAll('button'));
+        
+        for (var b = 0; b < allButtons.length; b++) {
+            var btn = allButtons[b];
+            var btnText = (btn.innerText || btn.textContent || '').trim();
+            if (btnText !== 'Toggle actions menu') continue;
+            
+            // Walk up to find if this button belongs to the target story
+            var ancestor = btn.parentElement;
+            for (var level = 0; level < 20 && ancestor && ancestor.tagName !== 'BODY'; level++) {
+                var headingsHere = ancestor.querySelectorAll('h2, h3');
+                for (var h = 0; h < headingsHere.length; h++) {
+                    var ht = (headingsHere[h].innerText || headingsHere[h].textContent || '').trim().toLowerCase();
+                    if (ht === titleToMatch) {
+                        // Force the button and its ancestors visible (needed in headless mode)
+                        btn.style.setProperty('opacity', '1', 'important');
+                        btn.style.setProperty('visibility', 'visible', 'important');
+                        btn.style.setProperty('display', 'inline-flex', 'important');
+                        btn.style.setProperty('pointer-events', 'auto', 'important');
+                        btn.style.setProperty('width', '36px', 'important');
+                        btn.style.setProperty('height', '36px', 'important');
+                        btn.style.setProperty('overflow', 'visible', 'important');
+                        btn.style.setProperty('position', 'relative', 'important');
+                        var p = btn.parentElement;
+                        for (var pl = 0; pl < 5 && p; pl++) {
+                            p.style.setProperty('opacity', '1', 'important');
+                            p.style.setProperty('visibility', 'visible', 'important');
+                            p.style.setProperty('overflow', 'visible', 'important');
+                            p = p.parentElement;
+                        }
+                        
+                        btn.scrollIntoView({block: 'center'});
+                        
+                        // Dispatch proper mouse event sequence to trigger React handlers
+                        var rect = btn.getBoundingClientRect();
+                        var cx = rect.left + rect.width / 2;
+                        var cy = rect.top + rect.height / 2;
+                        var opts = {bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy};
+                        btn.dispatchEvent(new MouseEvent('mouseover', opts));
+                        btn.dispatchEvent(new MouseEvent('mouseenter', {bubbles: false, view: window}));
+                        btn.dispatchEvent(new MouseEvent('pointerdown', opts));
+                        btn.dispatchEvent(new MouseEvent('mousedown', opts));
+                        btn.dispatchEvent(new MouseEvent('pointerup', opts));
+                        btn.dispatchEvent(new MouseEvent('mouseup', opts));
+                        btn.dispatchEvent(new MouseEvent('click', opts));
                         return true;
                     }
                 }
+                ancestor = ancestor.parentElement;
             }
         }
         return false;
     """, title)
     
     if not opened:
-        print(f"    [-] Could not find 'More options' button for: {title}")
+        print(f"    [-] Could not find 'More options' button for: {title}", flush=True)
         return False
-        
-    time.sleep(1.5)
     
-    # 2. Click "Delete story"
+    print(f"    [*] Clicked 3-dots button via JS MouseEvent dispatch", flush=True)
+    
+    # Step 2: Wait for popup menu and click "Delete story" / "Delete draft"
+    time.sleep(2)
+    
+    # Debug: dump what menu items are visible after clicking
+    try:
+        menu_items = driver.execute_script("""
+            var items = [];
+            var all = document.querySelectorAll('button, a, li, div[role="menuitem"], [role="option"]');
+            for (var i = 0; i < all.length; i++) {
+                var txt = (all[i].innerText || all[i].textContent || '').trim().toLowerCase();
+                if (txt.includes('delete') || txt.includes('edit') || txt.includes('pin') || 
+                    txt.includes('share') || txt.includes('hide') || txt.includes('copy')) {
+                    items.push(txt.substring(0, 40));
+                }
+            }
+            return items;
+        """)
+        print(f"    [DEBUG] Menu items found: {menu_items}", flush=True)
+    except Exception as e:
+        print(f"    [WARN] Could not dump menu items: {e}", flush=True)
+    
+    # Try to click Delete story / Delete draft using JS.
+    # We must filter out hidden elements (width == 0) because Medium duplicates the menu in the DOM (mobile vs desktop).
+    delete_keywords = ['delete story', 'delete draft']
+    time.sleep(1)
+    
     clicked_delete = driver.execute_script("""
-        var btns = document.querySelectorAll('button, a, div[role="menuitem"], div[role="button"]');
-        for (var i = 0; i < btns.length; i++) {
-            var txt = (btns[i].innerText || btns[i].textContent || '').trim().toLowerCase();
-            if (txt === 'delete story') {
-                btns[i].click();
-                return true;
+        var keywords = arguments[0];
+        var all = document.querySelectorAll('button, a, li, div[role="menuitem"], [role="option"]');
+        for (var k = 0; k < keywords.length; k++) {
+            for (var i = 0; i < all.length; i++) {
+                var txt = (all[i].innerText || all[i].textContent || '').trim().toLowerCase();
+                if (txt === keywords[k]) {
+                    var rect = all[i].getBoundingClientRect();
+                    // MUST be visible on screen
+                    if (rect.width > 0 && rect.height > 0) {
+                        all[i].scrollIntoView({block: 'center'});
+                        
+                        var cx = rect.left + rect.width / 2;
+                        var cy = rect.top + rect.height / 2;
+                        var opts = {bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy};
+                        
+                        // Fire full mouse sequence and standard click
+                        all[i].dispatchEvent(new MouseEvent('pointerdown', opts));
+                        all[i].dispatchEvent(new MouseEvent('mousedown', opts));
+                        all[i].dispatchEvent(new MouseEvent('pointerup', opts));
+                        all[i].dispatchEvent(new MouseEvent('mouseup', opts));
+                        all[i].dispatchEvent(new MouseEvent('click', opts));
+                        all[i].click(); // Fallback native click
+                        return true;
+                    }
+                }
             }
         }
         return false;
-    """)
-    
+    """, delete_keywords)
+            
     if not clicked_delete:
-        print(f"    [-] Could not find 'Delete story' menu item for: {title}")
-        # Click elsewhere to close menu
+        print(f"    [-] Could not find or click 'Delete story' menu item for: {title}", flush=True)
+        driver.execute_script("document.body.click();")
+        time.sleep(0.5)
+        return False
+        
+    print(f"    [*] Clicked 'Delete story' via visible JS dispatch", flush=True)
+        
+    # Step 3: Wait for modal and confirm Delete
+    time.sleep(2)
+    confirmed = False
+    
+    # Find all buttons in the dialog and click the one that says 'delete'
+    dialog_btns = driver.find_elements(By.CSS_SELECTOR, '[role="dialog"] button, .modal button')
+    if not dialog_btns:
+        dialog_btns = driver.find_elements(By.TAG_NAME, 'button')  # fallback
+        
+    for btn in dialog_btns:
+        try:
+            txt = (btn.text or btn.get_attribute('innerText') or '').strip().lower()
+            if txt == 'delete' and btn.is_enabled():
+                ActionChains(driver).move_to_element(btn).pause(0.5).click().perform()
+                confirmed = True
+                break
+        except Exception:
+            pass
+            
+    if not confirmed:
+        print(f"    [-] Could not find confirmation 'Delete' button for: {title}", flush=True)
         driver.execute_script("document.body.click();")
         return False
         
-    time.sleep(1.5)
-    
-    # 3. Confirm Delete
-    confirmed = driver.execute_script("""
-        var btns = document.querySelectorAll('button');
-        for (var i = 0; i < btns.length; i++) {
-            var txt = (btns[i].innerText || btns[i].textContent || '').trim().toLowerCase();
-            // In the confirmation modal, find the red 'Delete' button.
-            if (txt === 'delete' && !btns[i].disabled) {
-                btns[i].click();
-                return true;
-            }
-        }
-        return false;
-    """)
-    
-    if not confirmed:
-        print(f"    [-] Could not find confirmation 'Delete' button for: {title}")
-        # Try to cancel
-        driver.execute_script("""
-            var btns = document.querySelectorAll('button');
-            for (var i = 0; i < btns.length; i++) {
-                if ((btns[i].innerText || '').toLowerCase() === 'cancel') {
-                    btns[i].click();
-                }
-            }
-        """)
-        return False
-        
-    print(f"    [+] Successfully deleted one instance of: {title}")
-    time.sleep(3) # Wait for network request to finish and page to update
+    print(f"    [+] Successfully deleted one instance of: {title}", flush=True)
+    time.sleep(3)
     return True
+
+def kill_zombie_chrome():
+    """Kill any leftover chrome/chromedriver processes."""
+    for proc_name in ['chrome', 'chromedriver']:
+        try:
+            subprocess.run(['pkill', '-f', proc_name], capture_output=True, timeout=5)
+        except Exception:
+            pass
+    time.sleep(2)
+
+def safe_get_with_cookies(driver, url, cookies, max_attempts=3):
+    """
+    Safely navigates to a URL. If it times out, it rebuilds the driver,
+    re-applies cookies, and retries up to max_attempts.
+    Returns the (possibly new) driver.
+    """
+    for attempt in range(max_attempts):
+        try:
+            # Need to be on a medium domain to set cookies if driver was just rebuilt
+            if attempt > 0:
+                driver.get("https://medium.com/404")
+                time.sleep(2)
+                for c in cookies:
+                    cookie_dict = {
+                        "name": c["name"],
+                        "value": c["value"],
+                        "domain": c.get("domain", ".medium.com"),
+                        "path": c.get("path", "/")
+                    }
+                    if "secure" in c: cookie_dict["secure"] = c["secure"]
+                    if "httpOnly" in c: cookie_dict["httpOnly"] = c["httpOnly"]
+                    try: driver.add_cookie(cookie_dict)
+                    except: pass
+                try: driver.execute_script("window.localStorage.setItem('viewer-status|is-logged-in', 'true');")
+                except: pass
+            
+            driver.get(url)
+            return driver
+        except Exception as e:
+            print(f"    [WARN] Page load attempt {attempt+1} failed for {url}: {e}", flush=True)
+            if attempt < max_attempts - 1:
+                print("    [WARN] Rebuilding driver and retrying...", flush=True)
+                try: driver.quit()
+                except: pass
+                kill_zombie_chrome()
+                driver = build_driver()
+            else:
+                print("    [-] All attempts failed. Giving up on this URL.", flush=True)
+                raise e
+    return driver
 
 def cleanup_medium():
     cookies = load_cookies()
     if not cookies:
         print("No cookies found. Exiting.")
         return
+    
+    # Kill zombie Chrome processes before starting
+    kill_zombie_chrome()
         
     driver = build_driver()
     try:
-        # Set cookies
-        driver.get("https://medium.com/404")
+        # Initial authentication setup via 404 page
+        driver = safe_get_with_cookies(driver, "https://medium.com/404", cookies)
         time.sleep(2)
         for c in cookies:
             cookie_dict = {
@@ -196,7 +369,8 @@ def cleanup_medium():
             print(f"==============================================")
             
             while True:
-                driver.get(f"https://medium.com/me/stories/{page}")
+                target_url = f"https://medium.com/me/stories/{page}"
+                driver = safe_get_with_cookies(driver, target_url, cookies)
                 time.sleep(4)
                 
                 duplicates = get_duplicates_on_page(driver)
