@@ -2,7 +2,15 @@ import os
 import sys
 import time
 import json
+import random
 import undetected_chromedriver as uc
+
+def human_typing(element, text):
+    """Types character by character with random delays to simulate human typing."""
+    for char in text:
+        element.send_keys(char)
+        time.sleep(random.uniform(0.04, 0.15))
+
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -12,7 +20,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 class FatalError(Exception):
     pass
 
-def push_to_medium(url, title, content_html):
+def push_to_medium(url, title, content_html, topics=None):
     """
     Pushes an article to Medium using undetected_chromedriver and enforces SEO Canonical link.
     Returns True on success, False on recoverable error.
@@ -66,6 +74,31 @@ def push_to_medium(url, title, content_html):
         except:
             pass
 
+        # 0. Check for duplicates before creating new story
+        print("Checking for existing stories to prevent duplicates...")
+        try:
+            for page in ["public", "drafts"]:
+                driver.get(f"https://medium.com/me/stories/{page}")
+                time.sleep(3)
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(2)
+                
+                existing_titles = driver.execute_script("""
+                    var titles = [];
+                    var headings = document.querySelectorAll('h2, h3, a');
+                    for(var i=0; i<headings.length; i++){
+                        if (headings[i].innerText) {
+                            titles.push(headings[i].innerText.trim().toLowerCase());
+                        }
+                    }
+                    return titles;
+                """)
+                if title.lower() in existing_titles:
+                    print(f"Title '{title}' already exists in Medium {page}. Skipping publish.")
+                    return True
+        except Exception as e:
+            print(f"Warning: Failed to check existing stories: {e}")
+
         # Save HTML to local temp file to copy formatting natively
         temp_html_path = os.path.abspath("temp_post.html")
         with open(temp_html_path, "w", encoding="utf-8") as f:
@@ -113,13 +146,15 @@ def push_to_medium(url, title, content_html):
             driver.save_screenshot('error_page_load_timeout.png')
             raise e
             
-        time.sleep(2) # Give it an extra 2 seconds to ensure React finishes hydrating and focuses the title
+        time.sleep(random.uniform(2.0, 3.0)) # Give it an extra 2 seconds to ensure React finishes hydrating and focuses the title
         
         # Medium auto-focuses the Title field on load! We just start typing.
         actions = ActionChains(driver)
-        actions.send_keys(title)
+        for char in title:
+            actions.send_keys(char)
+            actions.pause(random.uniform(0.04, 0.15))
         actions.perform()
-        time.sleep(1)
+        time.sleep(random.uniform(0.5, 1.5))
 
         # 6. Press Enter to go to body
         actions = ActionChains(driver)
@@ -159,6 +194,44 @@ def push_to_medium(url, title, content_html):
         time.sleep(5)
         driver.save_screenshot('publish_modal_debug.png')
         
+        # Add Topics (up to 5 allowed on Medium)
+        if topics is None:
+            topics = ["Technology", "DevOps", "Infrastructure", "Python", "Cloud"]
+        else:
+            topics = topics[:5] if topics else ["Technology", "DevOps", "Infrastructure", "Python", "Cloud"]
+            
+        print(f"Adding topics: {topics}...")
+        try:
+            topic_input = driver.execute_script("""
+                var input = document.querySelector('input[placeholder="Add a topic..."]') || 
+                            document.querySelector('input[role="combobox"][aria-controls="tagMultiSelectMenu"]');
+                if (input) return input;
+                
+                var inputs = document.querySelectorAll('input');
+                for(var i=0; i<inputs.length; i++) {
+                    if(inputs[i].placeholder && (inputs[i].placeholder.toLowerCase().includes('topic') || inputs[i].placeholder.toLowerCase().includes('tag'))) {
+                        return inputs[i];
+                    }
+                }
+                return null;
+            """)
+            
+            if topic_input:
+                time.sleep(1)
+                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'}); arguments[0].focus(); arguments[0].click();", topic_input)
+                time.sleep(random.uniform(1.0, 1.5))
+                
+                for topic in topics:
+                    human_typing(topic_input, topic)
+                    time.sleep(random.uniform(2.0, 3.0)) # Wait for autocomplete suggestions
+                    topic_input.send_keys(Keys.RETURN)
+                    time.sleep(random.uniform(0.8, 1.5))
+                print("Topics added successfully.")
+            else:
+                print("Topic input field not found.")
+        except Exception as e:
+            print(f"Warning: Failed to add topics: {e}")
+            
         # 9. Click final Publish button in the modal
         print("Clicking final Publish button...")
         driver.execute_script("""

@@ -13,6 +13,13 @@ import time
 import json
 import subprocess
 import tempfile
+import random
+
+def human_typing(element, text):
+    """Types character by character with random delays to simulate human typing."""
+    for char in text:
+        element.send_keys(char)
+        time.sleep(random.uniform(0.04, 0.15))
 
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
@@ -100,7 +107,7 @@ def _build_driver() -> uc.Chrome:
 # Main entry point
 # ──────────────────────────────────────────────────────────────────────────────
 
-def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") -> bool:
+def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", topics: list = None) -> bool:
     """
     Imports an article into Medium via the Import feature, which automatically
     sets the canonical link back to `canonical_url`.
@@ -142,6 +149,31 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
         except Exception:
             pass
 
+        # ── Step 1.5: Check for duplicates ─────────────────────────
+        print("Checking for existing stories to prevent duplicates...")
+        try:
+            for page in ["public", "drafts"]:
+                driver.get(f"https://medium.com/me/stories/{page}")
+                time.sleep(3)
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(2)
+                
+                existing_titles = driver.execute_script("""
+                    var titles = [];
+                    var headings = document.querySelectorAll('h2, h3, a');
+                    for(var i=0; i<headings.length; i++){
+                        if (headings[i].innerText) {
+                            titles.push(headings[i].innerText.trim().toLowerCase());
+                        }
+                    }
+                    return titles;
+                """)
+                if title.lower() in existing_titles:
+                    print(f"Title '{title}' already exists in Medium {page}. Skipping publish.")
+                    return True
+        except Exception as e:
+            print(f"Warning: Failed to check existing stories: {e}")
+
         # ── Step 2: Navigate to Medium Import page ─────────────────────────
 
         print("Navigating to Medium import page...")
@@ -169,7 +201,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
                     time.sleep(0.5)
                     try:
                         input_elem.clear()
-                        input_elem.send_keys(canonical_url)
+                        human_typing(input_elem, canonical_url)
                     except Exception as selenium_err:
                         print(f"Selenium send_keys failed ({selenium_err}), falling back to JS injection...")
                         driver.execute_script("""
@@ -324,6 +356,45 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "") 
             raise Exception("Publish button not found or not enabled after waiting.")
 
         time.sleep(5)
+
+        # Add Topics (up to 5 allowed on Medium)
+        if topics is None:
+            topics = ["Technology", "DevOps", "Infrastructure", "Python", "Cloud"]
+        else:
+            # Fallback if the topics list is empty, otherwise take the first 5 topics
+            topics = topics[:5] if topics else ["Technology", "DevOps", "Infrastructure", "Python", "Cloud"]
+            
+        print(f"Adding topics: {topics}...")
+        try:
+            topic_input = driver.execute_script("""
+                var input = document.querySelector('input[placeholder="Add a topic..."]') || 
+                            document.querySelector('input[role="combobox"][aria-controls="tagMultiSelectMenu"]');
+                if (input) return input;
+                
+                var inputs = document.querySelectorAll('input');
+                for(var i=0; i<inputs.length; i++) {
+                    if(inputs[i].placeholder && (inputs[i].placeholder.toLowerCase().includes('topic') || inputs[i].placeholder.toLowerCase().includes('tag'))) {
+                        return inputs[i];
+                    }
+                }
+                return null;
+            """)
+            
+            if topic_input:
+                time.sleep(1)
+                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'}); arguments[0].focus(); arguments[0].click();", topic_input)
+                time.sleep(random.uniform(1.0, 1.5))
+                
+                for topic in topics:
+                    human_typing(topic_input, topic)
+                    time.sleep(random.uniform(2.0, 3.0)) # Wait for autocomplete suggestions
+                    topic_input.send_keys(Keys.RETURN)
+                    time.sleep(random.uniform(0.8, 1.5))
+                print("Topics added successfully.")
+            else:
+                print("Topic input field not found.")
+        except Exception as e:
+            print(f"Warning: Failed to add topics: {e}")
 
         # Click "Publish now" in the confirmation modal
         print("Clicking final 'Publish now' button...")
