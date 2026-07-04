@@ -26,8 +26,8 @@ Rules:
    - Blockquotes (>) for key aphorisms
    - Fenced code blocks for all code (``` python / ``` bash / etc.)
    - Logical heading hierarchy (# / ## / ###)
-   - NO Markdown/HTML tables (Medium doesn't support them). Convert all tabular data into bulleted lists.
-5. **Voice** - English, confident, pragmatic, zero filler words or corporate fluff.
+5. **NO TABLES ALLOWED** - Medium absolutely does NOT support Markdown tables. You are FORBIDDEN from generating any `| Column | Column |` markdown tables or HTML tables. If the source has a table, you MUST convert it into a structured bulleted list or dictionary format. Any table will break the pipeline.
+6. **Voice** - English, confident, pragmatic, zero filler words or corporate fluff.
 
 Output: polished Markdown ONLY.  No preamble, no "Here is your article:", no commentary.
 """
