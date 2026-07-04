@@ -1,6 +1,7 @@
 name: NOC ChatOps Alert Engine
 
 on:
+  push:
   schedule:
     # Runs at 08:00 AM UTC+8 (which is 00:00 UTC) every day
     - cron: '0 0 * * *'
