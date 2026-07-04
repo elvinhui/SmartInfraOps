@@ -26,6 +26,7 @@ Rules:
    - Blockquotes (>) for key aphorisms
    - Fenced code blocks for all code (``` python / ``` bash / etc.)
    - Logical heading hierarchy (# / ## / ###)
+   - Strict spacing: Use exactly ONE blank line between paragraphs and headings. Never use multiple blank lines (`\n\n\n`), as Medium's editor adds too much vertical space.
 5. **NO TABLES ALLOWED** - Medium absolutely does NOT support Markdown tables. You are FORBIDDEN from generating any `| Column | Column |` markdown tables or HTML tables. If the source has a table, you MUST convert it into a structured bulleted list or dictionary format. Any table will break the pipeline.
 6. **Voice** - English, confident, pragmatic, zero filler words or corporate fluff.
 
