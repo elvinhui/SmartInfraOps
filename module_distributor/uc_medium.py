@@ -174,22 +174,32 @@ def push_to_medium(url, title, content_html, topics=None):
         
         # 8. Click Publish button to see the modal
         print("Waiting for Publish button to be enabled and clicking...")
+        publish_clicked = False
         for _ in range(15):
-            success = driver.execute_script("""
+            publish_btn = driver.execute_script("""
                 var btns = document.querySelectorAll('button');
                 for(var i=0; i<btns.length; i++){
                     var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
                     if(txt === 'publish' && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled')) {
-                        btns[i].click();
-                        return true;
+                        return btns[i];
                     }
                 }
-                return false;
+                return null;
             """)
-            if success:
-                break
+            if publish_btn:
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", publish_btn)
+                    time.sleep(1)
+                    publish_btn.click()
+                    publish_clicked = True
+                    break
+                except Exception as e:
+                    print(f"Warning: Failed to click publish button: {e}")
             time.sleep(2)
         
+        if not publish_clicked:
+            print("Warning: Publish button not found or clicked.")
+
         print("Waiting for modal to render...")
         time.sleep(5)
         driver.save_screenshot('publish_modal_debug.png')

@@ -426,20 +426,25 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
         print("Waiting for Publish button...")
         publish_clicked = False
         for _ in range(20):
-            clicked = driver.execute_script("""
+            publish_btn = driver.execute_script("""
                 var btns = document.querySelectorAll('button');
                 for (var i = 0; i < btns.length; i++) {
                     var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
                     if (txt === 'publish' && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled')) {
-                        btns[i].click();
-                        return true;
+                        return btns[i];
                     }
                 }
-                return false;
+                return null;
             """)
-            if clicked:
-                publish_clicked = True
-                break
+            if publish_btn:
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", publish_btn)
+                    time.sleep(1)
+                    publish_btn.click()
+                    publish_clicked = True
+                    break
+                except Exception as e:
+                    print(f"Warning: Failed to click publish button: {e}")
             time.sleep(2)
 
         if not publish_clicked:
