@@ -202,33 +202,106 @@ def push_to_medium(url, title, content_html, topics=None):
             
         print(f"Adding topics: {topics}...")
         try:
-            topic_input = driver.execute_script("""
-                var input = document.querySelector('input[placeholder="Add a topic..."]') || 
-                            document.querySelector('input[role="combobox"][aria-controls="tagMultiSelectMenu"]');
-                if (input) return input;
-                
-                var inputs = document.querySelectorAll('input');
-                for(var i=0; i<inputs.length; i++) {
-                    if(inputs[i].placeholder && (inputs[i].placeholder.toLowerCase().includes('topic') || inputs[i].placeholder.toLowerCase().includes('tag'))) {
-                        return inputs[i];
+            # The topic combobox only appears after Medium's publish modal fully renders.
+            # The modal container can be taller than the viewport (especially in headless
+            # 1280x800), so the topic section at the bottom may not be in the DOM or
+            # visible until we scroll the modal container down.
+            topic_input = None
+            for attempt in range(20):
+                # Scroll the publish modal container down to reveal the topic section.
+                driver.execute_script("""
+                    // 1. Look for the Topics heading text and scroll it into view
+                    var allText = document.querySelectorAll('p, h3, h4, label, span, div');
+                    for (var i = 0; i < allText.length; i++) {
+                        var txt = (allText[i].textContent || '').trim();
+                        if (txt === 'Topics' || txt === 'Add up to five topics to help readers find your story.') {
+                            allText[i].scrollIntoView({behavior: 'instant', block: 'center'});
+                            return;
+                        }
                     }
-                }
-                return null;
-            """)
+                    
+                    // 2. Scroll any scrollable overlay/dialog container
+                    var overlays = document.querySelectorAll('[role="dialog"], [class*="overlay"], [class*="modal"]');
+                    for (var i = 0; i < overlays.length; i++) {
+                        if (overlays[i].scrollHeight > overlays[i].clientHeight) {
+                            overlays[i].scrollTop = overlays[i].scrollHeight;
+                            return;
+                        }
+                    }
+                    
+                    // 3. Fallback: scroll any large scrollable div
+                    var divs = document.querySelectorAll('div');
+                    for (var i = 0; i < divs.length; i++) {
+                        var d = divs[i];
+                        if (d.scrollHeight > d.clientHeight + 100 && d.scrollHeight > 500) {
+                            d.scrollTop = d.scrollHeight;
+                            return;
+                        }
+                    }
+                    
+                    // 4. Last resort: scroll the page itself
+                    window.scrollTo(0, document.body.scrollHeight);
+                """)
+                time.sleep(1)
+
+                topic_input = driver.execute_script("""
+                    var el = document.querySelector('input[role="combobox"][aria-controls="tagMultiSelectMenu"]');
+                    if (el) return el;
+                    
+                    el = document.querySelector('input[placeholder="Add a topic..."]');
+                    if (el) return el;
+                    
+                    el = document.querySelector('input[aria-describedby="tagMultiSelectMenu"]');
+                    if (el) return el;
+                    
+                    var inputs = document.querySelectorAll('input');
+                    for (var i = 0; i < inputs.length; i++) {
+                        var ph = (inputs[i].placeholder || '').toLowerCase();
+                        if (ph.includes('topic') || ph.includes('tag')) {
+                            return inputs[i];
+                        }
+                    }
+                    return null;
+                """)
+                if topic_input:
+                    print(f"Found topic input on attempt {attempt + 1}.")
+                    break
+                if attempt % 5 == 4:
+                    print(f"Topic input not found after {attempt + 1} attempts, still trying...")
+                time.sleep(1)
             
             if topic_input:
-                time.sleep(1)
-                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'}); arguments[0].focus(); arguments[0].click();", topic_input)
+                driver.save_screenshot("module_distributor/debug_topic_input_found.png")
+                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", topic_input)
+                time.sleep(0.5)
+                driver.execute_script("arguments[0].focus(); arguments[0].click();", topic_input)
                 time.sleep(random.uniform(1.0, 1.5))
                 
                 for topic in topics:
                     human_typing(topic_input, topic)
-                    time.sleep(random.uniform(2.0, 3.0)) # Wait for autocomplete suggestions
+                    time.sleep(random.uniform(2.0, 3.0))  # Wait for autocomplete suggestions
                     topic_input.send_keys(Keys.RETURN)
                     time.sleep(random.uniform(0.8, 1.5))
                 print("Topics added successfully.")
             else:
-                print("Topic input field not found.")
+                driver.save_screenshot("module_distributor/error_topic_not_found.png")
+                print("Topic input field not found after 20 attempts.")
+                # Debug: dump all inputs found in the page
+                debug_inputs = driver.execute_script("""
+                    var inputs = document.querySelectorAll('input');
+                    var info = [];
+                    for (var i = 0; i < inputs.length; i++) {
+                        info.push({
+                            placeholder: inputs[i].placeholder || '',
+                            role: inputs[i].getAttribute('role') || '',
+                            type: inputs[i].type || '',
+                            visible: inputs[i].offsetParent !== null,
+                            rect: inputs[i].getBoundingClientRect().toJSON()
+                        });
+                    }
+                    return JSON.stringify(info, null, 2);
+                """)
+                print(f"Debug - all inputs on page: {debug_inputs}")
         except Exception as e:
             print(f"Warning: Failed to add topics: {e}")
             

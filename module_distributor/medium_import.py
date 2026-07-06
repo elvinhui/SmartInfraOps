@@ -458,9 +458,51 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
         print(f"Adding topics: {topics}...")
         try:
             # The topic combobox only appears after Medium's publish modal fully renders.
-            # We must retry until it shows up in the DOM.
+            # The modal container can be taller than the viewport (especially in headless
+            # 1280x800), so the topic section at the bottom may not be in the DOM or
+            # visible until we scroll the modal container down.
             topic_input = None
-            for attempt in range(15):
+            for attempt in range(20):
+                # Scroll the publish modal container down to reveal the topic section.
+                # Medium wraps the publish form in a scrollable overlay/dialog.
+                driver.execute_script("""
+                    // Try to scroll the modal/overlay that contains the publish form.
+                    // Medium uses a few different container patterns:
+                    
+                    // 1. Look for the Topics heading text and scroll it into view
+                    var allText = document.querySelectorAll('p, h3, h4, label, span, div');
+                    for (var i = 0; i < allText.length; i++) {
+                        var txt = (allText[i].textContent || '').trim();
+                        if (txt === 'Topics' || txt === 'Add up to five topics to help readers find your story.') {
+                            allText[i].scrollIntoView({behavior: 'instant', block: 'center'});
+                            return;
+                        }
+                    }
+                    
+                    // 2. Scroll any scrollable overlay/dialog container
+                    var overlays = document.querySelectorAll('[role="dialog"], [class*="overlay"], [class*="modal"]');
+                    for (var i = 0; i < overlays.length; i++) {
+                        if (overlays[i].scrollHeight > overlays[i].clientHeight) {
+                            overlays[i].scrollTop = overlays[i].scrollHeight;
+                            return;
+                        }
+                    }
+                    
+                    // 3. Fallback: scroll any large scrollable div
+                    var divs = document.querySelectorAll('div');
+                    for (var i = 0; i < divs.length; i++) {
+                        var d = divs[i];
+                        if (d.scrollHeight > d.clientHeight + 100 && d.scrollHeight > 500) {
+                            d.scrollTop = d.scrollHeight;
+                            return;
+                        }
+                    }
+                    
+                    // 4. Last resort: scroll the page itself
+                    window.scrollTo(0, document.body.scrollHeight);
+                """)
+                time.sleep(1)
+
                 topic_input = driver.execute_script("""
                     // Primary: exact match from DOM inspection
                     var el = document.querySelector('input[role="combobox"][aria-controls="tagMultiSelectMenu"]');
@@ -470,7 +512,11 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                     el = document.querySelector('input[placeholder="Add a topic..."]');
                     if (el) return el;
                     
-                    // Tertiary: broad scan
+                    // Tertiary: aria-describedby match (from observed DOM)
+                    el = document.querySelector('input[aria-describedby="tagMultiSelectMenu"]');
+                    if (el) return el;
+                    
+                    // Quaternary: broad scan for any topic/tag input
                     var inputs = document.querySelectorAll('input');
                     for (var i = 0; i < inputs.length; i++) {
                         var ph = (inputs[i].placeholder || '').toLowerCase();
@@ -483,6 +529,8 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                 if topic_input:
                     print(f"Found topic input on attempt {attempt + 1}.")
                     break
+                if attempt % 5 == 4:
+                    print(f"Topic input not found after {attempt + 1} attempts, still trying...")
                 time.sleep(1)
             
             if topic_input:
@@ -500,7 +548,23 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                 print("Topics added successfully.")
             else:
                 driver.save_screenshot("module_distributor/error_topic_not_found.png")
-                print("Topic input field not found after 15 attempts.")
+                print("Topic input field not found after 20 attempts.")
+                # Debug: dump all inputs found in the page
+                debug_inputs = driver.execute_script("""
+                    var inputs = document.querySelectorAll('input');
+                    var info = [];
+                    for (var i = 0; i < inputs.length; i++) {
+                        info.push({
+                            placeholder: inputs[i].placeholder || '',
+                            role: inputs[i].getAttribute('role') || '',
+                            type: inputs[i].type || '',
+                            visible: inputs[i].offsetParent !== null,
+                            rect: inputs[i].getBoundingClientRect().toJSON()
+                        });
+                    }
+                    return JSON.stringify(info, null, 2);
+                """)
+                print(f"Debug - all inputs on page: {debug_inputs}")
         except Exception as e:
             print(f"Warning: Failed to add topics: {e}")
 
