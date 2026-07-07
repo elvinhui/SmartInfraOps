@@ -172,7 +172,33 @@ def push_to_medium(url, title, content_html, topics=None):
         actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
         time.sleep(8) # wait for medium to auto-save and process images
         
-        # 8. Click Publish button to see the modal
+        # 8. Wait for Autosave & Click Publish button to see the modal
+        print("Waiting for Medium autosave to complete...")
+        for save_attempt in range(30):
+            save_status = driver.execute_script("""
+                var btns = document.querySelectorAll('button');
+                for (var i = 0; i < btns.length; i++) {
+                    var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
+                    if (txt === 'saving...') return 'saving';
+                    if (txt === 'publish' || txt === 'publish and send') return 'ready';
+                }
+                return 'unknown';
+            """)
+            if save_status == 'ready':
+                print("Autosave complete. Publish button is ready.")
+                break
+            
+            if save_attempt > 0 and save_attempt % 10 == 0:
+                print("Still saving... triggering a minor edit to force retry.")
+                try:
+                    actions = ActionChains(driver)
+                    actions.key_down(Keys.CONTROL).send_keys(Keys.END).key_up(Keys.CONTROL).perform()
+                    time.sleep(0.5)
+                    actions.send_keys(' ').send_keys(Keys.BACKSPACE).perform()
+                except:
+                    pass
+            time.sleep(2)
+            
         print("Waiting for Publish button to be enabled and clicking...")
         publish_clicked = False
         for attempt in range(20):

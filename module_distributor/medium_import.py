@@ -422,7 +422,36 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
         time.sleep(2)
         driver.save_screenshot("module_distributor/debug_after_cleanup.png")
 
-        # ── Step 7: Publish ───────────────────────────────────────────────
+        # ── Step 7: Wait for Autosave & Publish ───────────────────────────────
+        print("Waiting for Medium autosave to complete...")
+        # If Medium is stuck on "Saving..." or shows the red error banner, we can't publish.
+        # We will wait up to 60 seconds. If stuck, we trigger a minor edit to force a retry.
+        for save_attempt in range(30):
+            save_status = driver.execute_script("""
+                var btns = document.querySelectorAll('button');
+                for (var i = 0; i < btns.length; i++) {
+                    var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
+                    if (txt === 'saving...') return 'saving';
+                    if (txt === 'publish' || txt === 'publish and send') return 'ready';
+                }
+                return 'unknown';
+            """)
+            if save_status == 'ready':
+                print("Autosave complete. Publish button is ready.")
+                break
+            
+            if save_attempt > 0 and save_attempt % 10 == 0:
+                print("Still saving... triggering a minor edit to force retry.")
+                try:
+                    # Type space and backspace at the end of the document
+                    actions = ActionChains(driver)
+                    actions.key_down(Keys.CONTROL).send_keys(Keys.END).key_up(Keys.CONTROL).perform()
+                    time.sleep(0.5)
+                    actions.send_keys(' ').send_keys(Keys.BACKSPACE).perform()
+                except:
+                    pass
+            time.sleep(2)
+
         print("Waiting for Publish button and modal...")
         publish_clicked = False
         for attempt in range(20):
