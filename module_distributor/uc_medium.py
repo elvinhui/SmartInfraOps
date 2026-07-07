@@ -175,30 +175,39 @@ def push_to_medium(url, title, content_html, topics=None):
         # 8. Click Publish button to see the modal
         print("Waiting for Publish button to be enabled and clicking...")
         publish_clicked = False
-        for _ in range(15):
-            publish_btn = driver.execute_script("""
+        for attempt in range(20):
+            # Click the publish button
+            driver.execute_script("""
                 var btns = document.querySelectorAll('button');
-                for(var i=0; i<btns.length; i++){
+                for (var i = 0; i < btns.length; i++) {
                     var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
-                    if(txt === 'publish' && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled')) {
-                        return btns[i];
+                    if (txt.includes('publish') && !txt.includes('publish now') && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled') && btns[i].offsetParent !== null) {
+                        btns[i].scrollIntoView({behavior: 'instant', block: 'center'});
+                        btns[i].click();
+                        return;
                     }
                 }
-                return null;
             """)
-            if publish_btn:
-                try:
-                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", publish_btn)
-                    time.sleep(1)
-                    publish_btn.click()
-                    publish_clicked = True
-                    break
-                except Exception as e:
-                    print(f"Warning: Failed to click publish button: {e}")
             time.sleep(2)
+            
+            # Check if modal is open by looking for the topics input or "Publish now" button
+            modal_open = driver.execute_script("""
+                var el = document.querySelector('input[placeholder="Add a topic..."], input[aria-controls="tagMultiSelectMenu"]');
+                var btns = document.querySelectorAll('button');
+                var publishNow = Array.from(btns).some(b => (b.innerText || '').toLowerCase().trim().includes('publish now'));
+                var overlays = document.querySelectorAll('[role="dialog"], [class*="overlay"]');
+                return el !== null || publishNow || overlays.length > 0;
+            """)
+            
+            if modal_open:
+                publish_clicked = True
+                print("Publish modal successfully opened.")
+                break
+                
+            print(f"Publish modal not open after attempt {attempt + 1}, retrying click...")
         
         if not publish_clicked:
-            print("Warning: Publish button not found or clicked.")
+            print("Warning: Publish button not found or modal failed to open.")
 
         print("Waiting for modal to render...")
         time.sleep(5)
