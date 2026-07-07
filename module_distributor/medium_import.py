@@ -301,6 +301,10 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
         if polished_markdown:
             print("Replacing imported content with AI-polished version...")
 
+            import re
+            # Clean up excessive newlines before pasting to prevent huge vertical gaps
+            polished_markdown = re.sub(r'\n{3,}', '\n\n', polished_markdown)
+            
             # Prepend the title to the polished markdown so we can paste it all at once
             full_text = f"{title}\n\n{polished_markdown}"
 
@@ -348,79 +352,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             print("Polished content pasted.")
             driver.save_screenshot("module_distributor/debug_after_paste.png")
 
-        # ── Step 6b: Clean up empty paragraphs & code blocks in editor ────
-        # Medium's import/paste engine injects empty <p>, <pre>, <br>, and
-        # whitespace-only elements below headings, causing huge vertical gaps
-        # and phantom empty code blocks.
-        print("Cleaning up empty elements in editor...")
-        removed = driver.execute_script("""
-            var editor = document.querySelector('[contenteditable="true"]');
-            if (!editor) return 0;
-            var removed = 0;
 
-            function isEmpty(el) {
-                var text = (el.textContent || '').replace(/[\\u200b\\uFEFF\\s]/g, '');
-                return text === '';
-            }
-
-            function hasMeaningfulChild(el) {
-                return !!el.querySelector('img, iframe, figure, video');
-            }
-
-            // 1. Remove empty <pre> / code blocks (the phantom gray boxes)
-            var pres = editor.querySelectorAll('pre');
-            for (var i = pres.length - 1; i >= 0; i--) {
-                if (isEmpty(pres[i]) && !hasMeaningfulChild(pres[i])) {
-                    pres[i].remove();
-                    removed++;
-                }
-            }
-
-            // 2. Remove completely empty <p> tags
-            var paras = editor.querySelectorAll('p');
-            for (var i = paras.length - 1; i >= 0; i--) {
-                if (isEmpty(paras[i]) && !hasMeaningfulChild(paras[i])) {
-                    paras[i].remove();
-                    removed++;
-                }
-            }
-
-            // 3. Remove stray <br> elements that are direct children of the editor
-            var brs = editor.querySelectorAll(':scope > br');
-            for (var i = brs.length - 1; i >= 0; i--) {
-                brs[i].remove();
-                removed++;
-            }
-
-            // 4. Remove empty <div> wrappers with no meaningful content
-            var divs = editor.querySelectorAll('div');
-            for (var i = divs.length - 1; i >= 0; i--) {
-                var d = divs[i];
-                if (isEmpty(d) && !hasMeaningfulChild(d) && !d.querySelector('h1,h2,h3,h4,p,pre,code,ul,ol,blockquote')) {
-                    d.remove();
-                    removed++;
-                }
-            }
-
-            // 5. Specifically remove empty siblings right after headings
-            var headings = editor.querySelectorAll('h1, h2, h3, h4');
-            for (var i = 0; i < headings.length; i++) {
-                var next = headings[i].nextElementSibling;
-                while (next && isEmpty(next) && !hasMeaningfulChild(next) &&
-                       !next.matches('h1,h2,h3,h4,ul,ol,blockquote') &&
-                       !(next.matches('pre') && !isEmpty(next))) {
-                    var toRemove = next;
-                    next = next.nextElementSibling;
-                    toRemove.remove();
-                    removed++;
-                }
-            }
-
-            return removed;
-        """)
-        print(f"Removed {removed} empty elements from editor.")
-        time.sleep(2)
-        driver.save_screenshot("module_distributor/debug_after_cleanup.png")
 
         # ── Step 7: Wait for Autosave & Publish ───────────────────────────────
         print("Waiting for Medium autosave to complete...")
