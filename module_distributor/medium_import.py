@@ -302,11 +302,13 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             print("Replacing imported content with AI-polished version...")
 
             import re
+            polished_markdown = polished_markdown.strip()
             # Clean up excessive newlines before pasting to prevent huge vertical gaps
             polished_markdown = re.sub(r'\n{3,}', '\n\n', polished_markdown)
             
-            # Prepend the title to the polished markdown so we can paste it all at once
-            full_text = f"{title}\n\n{polished_markdown}"
+            # Prepend the title to the polished markdown so we can paste it all at once.
+            # Using a single newline prevents Medium from inserting an empty <p> block, which causes a huge gap.
+            full_text = f"{title}\n{polished_markdown}"
 
             # Put polished markdown into clipboard
             _set_clipboard(full_text)
