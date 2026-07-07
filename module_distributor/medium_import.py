@@ -511,15 +511,20 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             if topic_input:
                 driver.save_screenshot("module_distributor/debug_topic_input_found.png")
                 driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", topic_input)
-                time.sleep(0.5)
-                driver.execute_script("arguments[0].focus(); arguments[0].click();", topic_input)
-                time.sleep(random.uniform(1.0, 1.5))
+                time.sleep(1.0)
                 
+                # Use ActionChains to click and type, which is more reliable for React inputs
+                actions = ActionChains(driver)
+                actions.move_to_element(topic_input).click()
+                actions.pause(0.5)
                 for topic in topics:
-                    human_typing(topic_input, topic)
-                    time.sleep(random.uniform(2.0, 3.0))  # Wait for autocomplete suggestions
-                    topic_input.send_keys(Keys.RETURN)
-                    time.sleep(random.uniform(0.8, 1.5))
+                    for char in topic:
+                        actions.send_keys(char)
+                        actions.pause(random.uniform(0.05, 0.15))
+                    actions.pause(random.uniform(2.0, 3.0))  # Wait for autocomplete suggestions
+                    actions.send_keys(Keys.RETURN)
+                    actions.pause(random.uniform(0.8, 1.5))
+                actions.perform()
                 print("Topics added successfully.")
             else:
                 driver.save_screenshot("module_distributor/error_topic_not_found.png")
