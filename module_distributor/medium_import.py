@@ -306,12 +306,8 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             # Clean up excessive newlines before pasting to prevent huge vertical gaps
             polished_markdown = re.sub(r'\n{3,}', '\n\n', polished_markdown)
             
-            # Prepend the title to the polished markdown so we can paste it all at once.
-            # Using a single newline prevents Medium from inserting an empty <p> block, which causes a huge gap.
-            full_text = f"{title}\n{polished_markdown}"
-
-            # Put polished markdown into clipboard
-            _set_clipboard(full_text)
+            # Put polished markdown into clipboard (WITHOUT title, since we type title manually)
+            _set_clipboard(polished_markdown)
             time.sleep(0.5)
 
             # Focus first contenteditable (Medium editor)
@@ -332,21 +328,39 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             # Use xdotool if available (much more reliable in Xvfb than Selenium ActionChains)
             import shutil
             if shutil.which("xdotool"):
-                print("Clearing editor and pasting via xdotool...")
+                print("Clearing editor and typing title via xdotool...")
                 for _ in range(3):
                     subprocess.run(["xdotool", "key", "ctrl+a"])
                     time.sleep(0.3)
                 subprocess.run(["xdotool", "key", "Delete"])
                 time.sleep(1)
+                
+                # Type title
+                subprocess.run(["xdotool", "type", "--delay", "50", title])
+                time.sleep(1)
+                subprocess.run(["xdotool", "key", "Return"])
+                time.sleep(1)
+                
+                print("Pasting body via xdotool...")
                 subprocess.run(["xdotool", "key", "ctrl+v"])
             else:
-                print("Clearing editor and pasting via ActionChains...")
+                print("Clearing editor and typing title via ActionChains...")
                 actions = ActionChains(driver)
                 for _ in range(3):
                     actions.key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
                     time.sleep(0.3)
                 actions.send_keys(Keys.DELETE).perform()
                 time.sleep(1)
+                
+                actions = ActionChains(driver)
+                for char in title:
+                    actions.send_keys(char)
+                    actions.pause(random.uniform(0.02, 0.08))
+                actions.send_keys(Keys.RETURN)
+                actions.perform()
+                time.sleep(1)
+                
+                print("Pasting body via ActionChains...")
                 actions = ActionChains(driver)
                 actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
 
