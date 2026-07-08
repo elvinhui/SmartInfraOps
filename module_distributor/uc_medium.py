@@ -173,13 +173,19 @@ def push_to_medium(url, title, content_html, topics=None):
         time.sleep(8) # wait for medium to auto-save and process images
         
         # 8. Wait for Autosave & Click Publish button to see the modal
-        print("Waiting for Medium autosave to complete...")
-        for save_attempt in range(30):
+        print("Waiting for Medium to autosave...")
+        for save_attempt in range(60):
             save_status = driver.execute_script("""
+                var spans = document.querySelectorAll('span');
+                for (var i = 0; i < spans.length; i++) {
+                    var txt = (spans[i].innerText || spans[i].textContent || '').toLowerCase().trim();
+                    if (txt.includes('saving...')) return 'saving';
+                    if (txt.includes('saved')) return 'ready';
+                }
                 var btns = document.querySelectorAll('button');
                 for (var i = 0; i < btns.length; i++) {
                     var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
-                    if (txt === 'saving...') return 'saving';
+                    if (txt.includes('saving...')) return 'saving';
                     if (txt === 'publish' || txt === 'publish and send') return 'ready';
                 }
                 return 'unknown';
@@ -216,13 +222,18 @@ def push_to_medium(url, title, content_html, topics=None):
             """)
             time.sleep(2)
             
-            # Check if modal is open by looking for the topics input or "Publish now" button
+            # Check if modal is open by looking for VISIBLE topics input or "Publish now" button
             modal_open = driver.execute_script("""
                 var el = document.querySelector('input[placeholder="Add a topic..."], input[aria-controls="tagMultiSelectMenu"]');
+                var isElVisible = el && el.offsetParent !== null;
+                
                 var btns = document.querySelectorAll('button');
-                var publishNow = Array.from(btns).some(b => (b.innerText || '').toLowerCase().trim().includes('publish now'));
+                var publishNow = Array.from(btns).some(b => (b.innerText || '').toLowerCase().trim().includes('publish now') && b.offsetParent !== null);
+                
                 var overlays = document.querySelectorAll('[role="dialog"], [class*="overlay"]');
-                return el !== null || publishNow || overlays.length > 0;
+                var isOverlayVisible = Array.from(overlays).some(o => o.offsetParent !== null);
+                
+                return isElVisible || publishNow || isOverlayVisible;
             """)
             
             if modal_open:

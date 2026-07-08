@@ -371,15 +371,20 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
 
 
         # ── Step 7: Wait for Autosave & Publish ───────────────────────────────
-        print("Waiting for Medium autosave to complete...")
-        # If Medium is stuck on "Saving..." or shows the red error banner, we can't publish.
-        # We will wait up to 60 seconds. If stuck, we trigger a minor edit to force a retry.
-        for save_attempt in range(30):
+        # Wait for autosave to complete (Medium might be saving the imported draft)
+        print("Waiting for Medium to autosave...")
+        for save_attempt in range(60):
             save_status = driver.execute_script("""
+                var spans = document.querySelectorAll('span');
+                for (var i = 0; i < spans.length; i++) {
+                    var txt = (spans[i].innerText || spans[i].textContent || '').toLowerCase().trim();
+                    if (txt.includes('saving...')) return 'saving';
+                    if (txt.includes('saved')) return 'ready';
+                }
                 var btns = document.querySelectorAll('button');
                 for (var i = 0; i < btns.length; i++) {
                     var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
-                    if (txt === 'saving...') return 'saving';
+                    if (txt.includes('saving...')) return 'saving';
                     if (txt === 'publish' || txt === 'publish and send') return 'ready';
                 }
                 return 'unknown';
@@ -417,13 +422,17 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             """)
             time.sleep(2)
             
-            # Check if modal is open by looking for the topics input or "Publish now" button
+            # Check if modal is open by looking for VISIBLE topics input or "Publish now" button
             modal_open = driver.execute_script("""
                 var el = document.querySelector('input[placeholder="Add a topic..."], input[aria-controls="tagMultiSelectMenu"]');
+                var isElVisible = el && el.offsetParent !== null;
+                
                 var btns = document.querySelectorAll('button');
-                var publishNow = Array.from(btns).some(b => (b.innerText || '').toLowerCase().trim().includes('publish now'));
+                var publishNow = Array.from(btns).some(b => (b.innerText || '').toLowerCase().trim().includes('publish now') && b.offsetParent !== null);
+                
                 var overlays = document.querySelectorAll('[role="dialog"], [class*="overlay"]');
-                return el !== null || publishNow || overlays.length > 0;
+                var isOverlayVisible = Array.from(overlays).some(o => o.offsetParent !== null);
+                return isElVisible || publishNow || isOverlayVisible;
             """)
             
             if modal_open:
