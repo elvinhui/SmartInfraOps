@@ -93,13 +93,14 @@ def fetch_article_html(url):
 # Social variant generation (Gemini)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def generate_social_variants(title, url, text):
-    """Uses DeepSeek to generate Twitter + LinkedIn copy."""
+def generate_social_variants(title, url, text, categories):
+    """Uses DeepSeek to generate Twitter + LinkedIn copy, and Medium topics."""
     if not DEEPSEEK_API_KEY:
         print("DEEPSEEK_API_KEY not set. Using fallback text.")
         return {
             "twitter": f"New post: {title} #BuildInPublic #Python",
             "linkedin": f"I just published: {title}\n\n{url}",
+            "medium_topics": categories[:5] if categories else ["Technology", "DevOps", "Infrastructure", "Python", "Cloud"]
         }
 
     import openai
@@ -108,14 +109,15 @@ def generate_social_variants(title, url, text):
     system_prompt = (
         'You are a cynical but highly skilled DevOps/Infrastructure engineer who hates repetitive tasks. '
         'You run a blog called "Smart Infra Log". '
-        'You must output exactly a JSON object with two keys:\n'
+        'You must output exactly a JSON object with three keys:\n'
         '"twitter": A short, punchy tweet (max 280 chars) summarizing the technical highlight, '
         'slightly self-deprecating, ending with the tags #BuildInPublic #Python. DO NOT append the URL.\n'
         '"linkedin": A slightly longer, more professional but still authentic post abstracting the '
         'engineering philosophy behind the post, ending with the URL.\n'
+        '"medium_topics": A list of exactly 5 short strings representing the best Medium.com topics/tags for this article, factoring in the original tags if relevant (e.g. ["DevOps", "Python", "Infrastructure", "Cloud", "SRE"]).\n'
         'Do not wrap the JSON in markdown code blocks, just output the raw JSON.'
     )
-    user_prompt = f"Title: {title}\nURL: {url}\n\nArticle excerpt:\n{text}"
+    user_prompt = f"Title: {title}\nURL: {url}\nOriginal Tags: {categories}\n\nArticle excerpt:\n{text}"
 
     try:
         response = client.chat.completions.create(
@@ -135,6 +137,7 @@ def generate_social_variants(title, url, text):
         return {
             "twitter": f"New post: {title} #BuildInPublic #Python",
             "linkedin": f"I just published: {title}\n\n{url}",
+            "medium_topics": categories[:5] if categories else ["Technology", "DevOps", "Infrastructure", "Python", "Cloud"]
         }
 
 
@@ -155,8 +158,9 @@ def main():
         for item in root.findall('.//item'):
             title_elem = item.find('title')
             link_elem = item.find('link')
+            categories = [c.text for c in item.findall('category') if c.text]
             if title_elem is not None and link_elem is not None:
-                entries.append({'title': title_elem.text, 'link': link_elem.text})
+                entries.append({'title': title_elem.text, 'link': link_elem.text, 'categories': categories})
     except Exception as e:
         print(f"Error fetching/parsing RSS: {e}")
         sys.exit(1)
@@ -177,7 +181,7 @@ def main():
             continue
         clean_link = link.rstrip('/')
         if clean_link not in posted_urls:
-            new_entries.append((clean_link, title))
+            new_entries.append((clean_link, title, entry.get('categories', [])))
 
     if not new_entries:
         print("No new articles to distribute.")
@@ -191,7 +195,7 @@ def main():
 
     success_count = 0
 
-    for url, title in new_entries:
+    for url, title, categories in new_entries:
         print(f"\n--- Processing: {title} ({url}) ---")
 
         # 1. Fetch content
@@ -203,11 +207,14 @@ def main():
         polished_markdown = polish_article(html_content)
         # Empty string = DeepSeek skipped/failed; Medium keeps raw imported content
 
-        # 3. Generate social copy with Gemini
-        print("Generating AI Social Variants...")
-        variants = generate_social_variants(title, url, text_excerpt)
+        # 3. Generate social copy with Gemini/DeepSeek
+        print("Generating AI Social Variants and Medium Topics...")
+        variants = generate_social_variants(title, url, text_excerpt, categories)
         twitter_text = variants.get("twitter", "")
         linkedin_text = variants.get("linkedin", "")
+        medium_topics = variants.get("medium_topics", categories)
+        if not isinstance(medium_topics, list):
+            medium_topics = categories
 
         # 4. Post to X (Twitter) via Playwright
         print("Pushing to X (Twitter)...")
@@ -223,7 +230,7 @@ def main():
         # 6. Push to Medium via undetected_chromedriver Import + paste
         print("Pushing to Medium (Import + AI paste)...")
         try:
-            med_success = push_to_medium(url, title, polished_markdown)
+            med_success = push_to_medium(url, title, polished_markdown, topics=medium_topics)
         except FatalError as e:
             print(f"FATAL ERROR: {e}")
             sys.exit(1)

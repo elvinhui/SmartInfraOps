@@ -2,7 +2,15 @@ import os
 import sys
 import time
 import json
+import random
 import undetected_chromedriver as uc
+
+def human_typing(element, text):
+    """Types character by character with random delays to simulate human typing."""
+    for char in text:
+        element.send_keys(char)
+        time.sleep(random.uniform(0.04, 0.15))
+
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -12,7 +20,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 class FatalError(Exception):
     pass
 
-def push_to_medium(url, title, content_html):
+def push_to_medium(url, title, content_html, topics=None):
     """
     Pushes an article to Medium using undetected_chromedriver and enforces SEO Canonical link.
     Returns True on success, False on recoverable error.
@@ -66,6 +74,31 @@ def push_to_medium(url, title, content_html):
         except:
             pass
 
+        # 0. Check for duplicates before creating new story
+        print("Checking for existing stories to prevent duplicates...")
+        try:
+            for page in ["public", "drafts"]:
+                driver.get(f"https://medium.com/me/stories/{page}")
+                time.sleep(3)
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(2)
+                
+                existing_titles = driver.execute_script("""
+                    var titles = [];
+                    var headings = document.querySelectorAll('h2, h3, a');
+                    for(var i=0; i<headings.length; i++){
+                        if (headings[i].innerText) {
+                            titles.push(headings[i].innerText.trim().toLowerCase());
+                        }
+                    }
+                    return titles;
+                """)
+                if title.lower() in existing_titles:
+                    print(f"Title '{title}' already exists in Medium {page}. Skipping publish.")
+                    return True
+        except Exception as e:
+            print(f"Warning: Failed to check existing stories: {e}")
+
         # Save HTML to local temp file to copy formatting natively
         temp_html_path = os.path.abspath("temp_post.html")
         with open(temp_html_path, "w", encoding="utf-8") as f:
@@ -113,13 +146,15 @@ def push_to_medium(url, title, content_html):
             driver.save_screenshot('error_page_load_timeout.png')
             raise e
             
-        time.sleep(2) # Give it an extra 2 seconds to ensure React finishes hydrating and focuses the title
+        time.sleep(random.uniform(2.0, 3.0)) # Give it an extra 2 seconds to ensure React finishes hydrating and focuses the title
         
         # Medium auto-focuses the Title field on load! We just start typing.
         actions = ActionChains(driver)
-        actions.send_keys(title)
+        for char in title:
+            actions.send_keys(char)
+            actions.pause(random.uniform(0.04, 0.15))
         actions.perform()
-        time.sleep(1)
+        time.sleep(random.uniform(0.5, 1.5))
 
         # 6. Press Enter to go to body
         actions = ActionChains(driver)
@@ -137,28 +172,199 @@ def push_to_medium(url, title, content_html):
         actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
         time.sleep(8) # wait for medium to auto-save and process images
         
-        # 8. Click Publish button to see the modal
-        print("Waiting for Publish button to be enabled and clicking...")
-        for _ in range(15):
-            success = driver.execute_script("""
+        # 8. Wait for Autosave & Click Publish button to see the modal
+        print("Waiting for Medium to autosave...")
+        for save_attempt in range(60):
+            save_status = driver.execute_script("""
+                var spans = document.querySelectorAll('span');
+                for (var i = 0; i < spans.length; i++) {
+                    var txt = (spans[i].innerText || spans[i].textContent || '').toLowerCase().trim();
+                    if (txt.includes('saving...')) return 'saving';
+                    if (txt.includes('saved')) return 'ready';
+                }
                 var btns = document.querySelectorAll('button');
-                for(var i=0; i<btns.length; i++){
+                for (var i = 0; i < btns.length; i++) {
                     var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
-                    if(txt === 'publish' && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled')) {
+                    if (txt.includes('saving...')) return 'saving';
+                    if (txt === 'publish' || txt === 'publish and send') return 'ready';
+                }
+                return 'unknown';
+            """)
+            if save_status == 'ready':
+                print("Autosave complete. Publish button is ready.")
+                break
+            
+            if save_attempt > 0 and save_attempt % 10 == 0:
+                print("Still saving... triggering a minor edit to force retry.")
+                try:
+                    actions = ActionChains(driver)
+                    actions.key_down(Keys.CONTROL).send_keys(Keys.END).key_up(Keys.CONTROL).perform()
+                    time.sleep(0.5)
+                    actions.send_keys(' ').send_keys(Keys.BACKSPACE).perform()
+                except:
+                    pass
+            time.sleep(2)
+            
+        print("Waiting for Publish button to be enabled and clicking...")
+        publish_clicked = False
+        for attempt in range(20):
+            # Click the publish button
+            driver.execute_script("""
+                var btns = document.querySelectorAll('button');
+                for (var i = 0; i < btns.length; i++) {
+                    var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
+                    if (txt.includes('publish') && !txt.includes('publish now') && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled') && btns[i].offsetParent !== null) {
+                        btns[i].scrollIntoView({behavior: 'instant', block: 'center'});
                         btns[i].click();
-                        return true;
+                        return;
                     }
                 }
-                return false;
             """)
-            if success:
-                break
             time.sleep(2)
+            
+            # Check if modal is open by looking for VISIBLE topics input or "Publish now" button
+            modal_open = driver.execute_script("""
+                var el = document.querySelector('input[placeholder="Add a topic..."], input[aria-controls="tagMultiSelectMenu"]');
+                var isElVisible = el && el.offsetParent !== null;
+                
+                var btns = document.querySelectorAll('button');
+                var publishNow = Array.from(btns).some(b => (b.innerText || '').toLowerCase().trim().includes('publish now') && b.offsetParent !== null);
+                
+                var overlays = document.querySelectorAll('[role="dialog"], [class*="overlay"]');
+                var isOverlayVisible = Array.from(overlays).some(o => o.offsetParent !== null);
+                
+                return isElVisible || publishNow || isOverlayVisible;
+            """)
+            
+            if modal_open:
+                publish_clicked = True
+                print("Publish modal successfully opened.")
+                break
+                
+            print(f"Publish modal not open after attempt {attempt + 1}, retrying click...")
         
+        if not publish_clicked:
+            print("Warning: Publish button not found or modal failed to open.")
+
         print("Waiting for modal to render...")
         time.sleep(5)
         driver.save_screenshot('publish_modal_debug.png')
         
+        # Add Topics (up to 5 allowed on Medium)
+        if topics is None:
+            topics = ["Technology", "DevOps", "Infrastructure", "Python", "Cloud"]
+        else:
+            topics = topics[:5] if topics else ["Technology", "DevOps", "Infrastructure", "Python", "Cloud"]
+            
+        print(f"Adding topics: {topics}...")
+        try:
+            # The topic combobox only appears after Medium's publish modal fully renders.
+            # The modal container can be taller than the viewport (especially in headless
+            # 1280x800), so the topic section at the bottom may not be in the DOM or
+            # visible until we scroll the modal container down.
+            topic_input = None
+            for attempt in range(20):
+                # Scroll the publish modal container down to reveal the topic section.
+                driver.execute_script("""
+                    // 1. Look for the Topics heading text and scroll it into view
+                    var allText = document.querySelectorAll('p, h3, h4, label, span, div');
+                    for (var i = 0; i < allText.length; i++) {
+                        var txt = (allText[i].textContent || '').trim();
+                        if (txt === 'Topics' || txt === 'Add up to five topics to help readers find your story.') {
+                            allText[i].scrollIntoView({behavior: 'instant', block: 'center'});
+                            return;
+                        }
+                    }
+                    
+                    // 2. Scroll any scrollable overlay/dialog container
+                    var overlays = document.querySelectorAll('[role="dialog"], [class*="overlay"], [class*="modal"]');
+                    for (var i = 0; i < overlays.length; i++) {
+                        if (overlays[i].scrollHeight > overlays[i].clientHeight) {
+                            overlays[i].scrollTop = overlays[i].scrollHeight;
+                            return;
+                        }
+                    }
+                    
+                    // 3. Fallback: scroll any large scrollable div
+                    var divs = document.querySelectorAll('div');
+                    for (var i = 0; i < divs.length; i++) {
+                        var d = divs[i];
+                        if (d.scrollHeight > d.clientHeight + 100 && d.scrollHeight > 500) {
+                            d.scrollTop = d.scrollHeight;
+                            return;
+                        }
+                    }
+                    
+                    // 4. Last resort: scroll the page itself
+                    window.scrollTo(0, document.body.scrollHeight);
+                """)
+                time.sleep(1)
+
+                topic_input = driver.execute_script("""
+                    var el = document.querySelector('input[role="combobox"][aria-controls="tagMultiSelectMenu"]');
+                    if (el) return el;
+                    
+                    el = document.querySelector('input[placeholder="Add a topic..."]');
+                    if (el) return el;
+                    
+                    el = document.querySelector('input[aria-describedby="tagMultiSelectMenu"]');
+                    if (el) return el;
+                    
+                    var inputs = document.querySelectorAll('input');
+                    for (var i = 0; i < inputs.length; i++) {
+                        var ph = (inputs[i].placeholder || '').toLowerCase();
+                        if (ph.includes('topic') || ph.includes('tag')) {
+                            return inputs[i];
+                        }
+                    }
+                    return null;
+                """)
+                if topic_input:
+                    print(f"Found topic input on attempt {attempt + 1}.")
+                    break
+                if attempt % 5 == 4:
+                    print(f"Topic input not found after {attempt + 1} attempts, still trying...")
+                time.sleep(1)
+            
+            if topic_input:
+                driver.save_screenshot("module_distributor/debug_topic_input_found.png")
+                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", topic_input)
+                time.sleep(1.0)
+                
+                actions = ActionChains(driver)
+                actions.move_to_element(topic_input).click()
+                actions.pause(0.5)
+                for topic in topics:
+                    for char in topic:
+                        actions.send_keys(char)
+                        actions.pause(random.uniform(0.05, 0.15))
+                    actions.pause(random.uniform(2.0, 3.0))  # Wait for autocomplete suggestions
+                    actions.send_keys(Keys.RETURN)
+                    actions.pause(random.uniform(0.8, 1.5))
+                actions.perform()
+                print("Topics added successfully.")
+            else:
+                driver.save_screenshot("module_distributor/error_topic_not_found.png")
+                print("Topic input field not found after 20 attempts.")
+                # Debug: dump all inputs found in the page
+                debug_inputs = driver.execute_script("""
+                    var inputs = document.querySelectorAll('input');
+                    var info = [];
+                    for (var i = 0; i < inputs.length; i++) {
+                        info.push({
+                            placeholder: inputs[i].placeholder || '',
+                            role: inputs[i].getAttribute('role') || '',
+                            type: inputs[i].type || '',
+                            visible: inputs[i].offsetParent !== null,
+                            rect: inputs[i].getBoundingClientRect().toJSON()
+                        });
+                    }
+                    return JSON.stringify(info, null, 2);
+                """)
+                print(f"Debug - all inputs on page: {debug_inputs}")
+        except Exception as e:
+            print(f"Warning: Failed to add topics: {e}")
+            
         # 9. Click final Publish button in the modal
         print("Clicking final Publish button...")
         driver.execute_script("""
