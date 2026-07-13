@@ -87,8 +87,24 @@ if command -v gost &> /dev/null; then
     ok "gost already installed."
 else
     info "Downloading gost v${GOST_VERSION} (${GOST_ARCH})..."
-    GOST_URL="https://ghproxy.net/https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_${GOST_ARCH}.tar.gz"
-    wget --show-progress -O $PREFIX/tmp/gost.tar.gz "$GOST_URL"
+    GOST_FILE="gost_${GOST_VERSION}_linux_${GOST_ARCH}.tar.gz"
+    
+    if wget --tries=3 --timeout=15 --show-progress -O $PREFIX/tmp/gost.tar.gz "https://kkgithub.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/${GOST_FILE}"; then
+        ok "Downloaded successfully"
+    elif wget --tries=3 --timeout=15 --show-progress -O $PREFIX/tmp/gost.tar.gz "https://ghproxy.net/https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/${GOST_FILE}"; then
+        ok "Downloaded via proxy"
+    else
+        err "Download failed. Please check network."
+        exit 1
+    fi
+    
+    # Verify file integrity
+    if ! tar -tzf $PREFIX/tmp/gost.tar.gz &>/dev/null; then
+        err "Downloaded file corrupted (unexpected EOF). Try running script again."
+        rm -f $PREFIX/tmp/gost.tar.gz
+        exit 1
+    fi
+
     tar xzf $PREFIX/tmp/gost.tar.gz -C $PREFIX/tmp
     chmod +x $PREFIX/tmp/gost
     mv $PREFIX/tmp/gost "$PREFIX/bin/gost"
