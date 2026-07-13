@@ -50,16 +50,7 @@ info "Installing required packages..."
 pkg update -y
 pkg install -y wget openssl termux-services cronie
 
-# ── Step 2: Install Tailscale ─────────────────────────────────
-info "Installing Tailscale..."
-if command -v tailscale &> /dev/null; then
-    ok "Tailscale already installed: $(tailscale version)"
-else
-    pkg install -y tailscale
-    ok "Tailscale installed."
-fi
-
-# ── Step 3: Download gost ────────────────────────────────────
+# ── Step 2: Detect Architecture ────────────────────────────────
 info "Detecting CPU architecture..."
 ARCH=$(uname -m)
 case "$ARCH" in
@@ -71,7 +62,26 @@ case "$ARCH" in
         exit 1
         ;;
 esac
-ok "Architecture: $ARCH → gost-${GOST_ARCH}"
+ok "Architecture: $ARCH → ${GOST_ARCH}"
+
+# ── Step 3: Install Tailscale ─────────────────────────────────
+info "Installing Tailscale (Static binary)..."
+if command -v tailscale &> /dev/null; then
+    ok "Tailscale already installed: $(tailscale version | head -n1)"
+else
+    TS_VERSION="1.68.2"
+    # Map GOST_ARCH to Tailscale arch (they use same naming: arm64, armv7, amd64)
+    TS_URL="https://pkgs.tailscale.com/stable/tailscale_${TS_VERSION}_${GOST_ARCH}.tgz"
+    info "Downloading Tailscale v${TS_VERSION}..."
+    wget -q --show-progress -O /tmp/tailscale.tgz "$TS_URL"
+    tar xzf /tmp/tailscale.tgz -C /tmp
+    mv /tmp/tailscale_${TS_VERSION}_${GOST_ARCH}/tailscale "$PREFIX/bin/"
+    mv /tmp/tailscale_${TS_VERSION}_${GOST_ARCH}/tailscaled "$PREFIX/bin/"
+    rm -rf /tmp/tailscale*
+    ok "Tailscale installed to $PREFIX/bin/"
+fi
+
+# ── Step 4: Download gost ────────────────────────────────────
 
 if command -v gost &> /dev/null; then
     ok "gost already installed."
@@ -85,7 +95,7 @@ else
     ok "gost installed to $PREFIX/bin/gost"
 fi
 
-# ── Step 4: Generate SOCKS5 credentials ──────────────────────
+# ── Step 5: Generate SOCKS5 credentials ──────────────────────
 CRED_FILE="$HOME/.gost_credentials"
 if [ -f "$CRED_FILE" ]; then
     source "$CRED_FILE"
@@ -99,9 +109,9 @@ else
     ok "Generated new credentials → $CRED_FILE"
 fi
 
-# ── Step 5: Start Tailscale ──────────────────────────────────
-info "Starting Tailscale daemon..."
-tailscaled &> /tmp/tailscaled.log &
+# ── Step 6: Start Tailscale ──────────────────────────────────
+info "Starting Tailscale daemon (userspace networking)..."
+tailscaled --tun=userspace-networking &> /tmp/tailscaled.log &
 sleep 2
 
 if tailscale status &> /dev/null; then
@@ -122,7 +132,7 @@ if [ -z "$TAILSCALE_IP" ]; then
 fi
 ok "Tailscale IP: $TAILSCALE_IP"
 
-# ── Step 6: Start gost SOCKS5 proxy ─────────────────────────
+# ── Step 7: Start gost SOCKS5 proxy ─────────────────────────
 info "Starting gost SOCKS5 proxy on ${TAILSCALE_IP}:${SOCKS_PORT}..."
 
 # Kill existing gost if running
@@ -142,7 +152,7 @@ else
     exit 1
 fi
 
-# ── Step 7: Setup Termux:Boot auto-start ─────────────────────
+# ── Step 8: Setup Termux:Boot auto-start ─────────────────────
 info "Configuring Termux:Boot auto-start..."
 BOOT_DIR="$HOME/.termux/boot"
 mkdir -p "$BOOT_DIR"
@@ -154,8 +164,8 @@ cat > "$BOOT_DIR/start-proxy.sh" << 'BOOTEOF'
 
 termux-wake-lock
 
-# Start Tailscale
-tailscaled &> /tmp/tailscaled.log &
+# Start Tailscale in userspace mode
+tailscaled --tun=userspace-networking &> /tmp/tailscaled.log &
 sleep 5
 tailscale up --hostname=smartinfra-phone
 
@@ -186,7 +196,7 @@ BOOTEOF
 chmod +x "$BOOT_DIR/start-proxy.sh"
 ok "Boot script created: $BOOT_DIR/start-proxy.sh"
 
-# ── Step 8: Setup watchdog cron ──────────────────────────────
+# ── Step 9: Setup watchdog cron ──────────────────────────────
 info "Setting up watchdog cron (every 5 minutes)..."
 
 WATCHDOG_SCRIPT="$HOME/gost-watchdog.sh"
@@ -213,7 +223,7 @@ chmod +x "$WATCHDOG_SCRIPT"
 sv-enable crond 2>/dev/null || true
 ok "Watchdog cron installed (every 5 min)."
 
-# ── Step 9: Enable wake lock ─────────────────────────────────
+# ── Step 10: Enable wake lock ─────────────────────────────────
 info "Acquiring Termux wake lock (prevents background kill)..."
 termux-wake-lock 2>/dev/null || warn "termux-wake-lock not available. Install Termux:API from F-Droid."
 
