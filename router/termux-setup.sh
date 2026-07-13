@@ -73,7 +73,7 @@ else
     # Map GOST_ARCH to Tailscale arch (they use same naming: arm64, armv7, amd64)
     TS_URL="https://pkgs.tailscale.com/stable/tailscale_${TS_VERSION}_${GOST_ARCH}.tgz"
     info "Downloading Tailscale v${TS_VERSION}..."
-    wget -q --show-progress -O $PREFIX/tmp/tailscale.tgz "$TS_URL"
+    wget --show-progress -O $PREFIX/tmp/tailscale.tgz "$TS_URL"
     tar xzf $PREFIX/tmp/tailscale.tgz -C $PREFIX/tmp
     mv $PREFIX/tmp/tailscale_${TS_VERSION}_${GOST_ARCH}/tailscale "$PREFIX/bin/"
     mv $PREFIX/tmp/tailscale_${TS_VERSION}_${GOST_ARCH}/tailscaled "$PREFIX/bin/"
@@ -87,8 +87,8 @@ if command -v gost &> /dev/null; then
     ok "gost already installed."
 else
     info "Downloading gost v${GOST_VERSION} (${GOST_ARCH})..."
-    GOST_URL="https://mirror.ghproxy.com/https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_${GOST_ARCH}.tar.gz"
-    wget -q --show-progress -O $PREFIX/tmp/gost.tar.gz "$GOST_URL"
+    GOST_URL="https://ghproxy.net/https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_${GOST_ARCH}.tar.gz"
+    wget --show-progress -O $PREFIX/tmp/gost.tar.gz "$GOST_URL"
     tar xzf $PREFIX/tmp/gost.tar.gz -C $PREFIX/tmp
     chmod +x $PREFIX/tmp/gost
     mv $PREFIX/tmp/gost "$PREFIX/bin/gost"
