@@ -87,11 +87,12 @@ if command -v gost &> /dev/null; then
     ok "gost already installed."
 else
     info "Downloading gost v${GOST_VERSION} (${GOST_ARCH})..."
-    GOST_URL="https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost-linux-${GOST_ARCH}-${GOST_VERSION}.gz"
-    wget -q --show-progress -O $PREFIX/tmp/gost.gz "$GOST_URL"
-    gzip -d $PREFIX/tmp/gost.gz
+    GOST_URL="https://mirror.ghproxy.com/https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_${GOST_ARCH}.tar.gz"
+    wget -q --show-progress -O $PREFIX/tmp/gost.tar.gz "$GOST_URL"
+    tar xzf $PREFIX/tmp/gost.tar.gz -C $PREFIX/tmp
     chmod +x $PREFIX/tmp/gost
     mv $PREFIX/tmp/gost "$PREFIX/bin/gost"
+    rm -f $PREFIX/tmp/gost.tar.gz $PREFIX/tmp/LICENSE $PREFIX/tmp/README*
     ok "gost installed to $PREFIX/bin/gost"
 fi
 
