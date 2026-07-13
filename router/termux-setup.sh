@@ -48,7 +48,7 @@ echo ""
 # ── Step 1: Install packages ─────────────────────────────────
 info "Installing required packages..."
 pkg update -y
-pkg install -y wget openssl termux-services cronie
+pkg install -y wget openssl openssl-tool termux-services cronie
 
 # ── Step 2: Detect Architecture ────────────────────────────────
 info "Detecting CPU architecture..."
