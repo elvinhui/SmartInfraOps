@@ -1,26 +1,9 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# ═══════════════════════════════════════════════════════════════
-# SmartInfraOps — Termux Phone Proxy Setup (One-Click)
-# 
-# Turns your Android phone into a SOCKS5 proxy endpoint
-# accessible via Tailscale mesh VPN.
-#
-# Usage:
-#   curl -fsSL <raw-url> | bash
-#   OR
-#   bash termux-setup.sh
-#
-# Prerequisites:
-#   - Termux installed from F-Droid (NOT Google Play)
-#   - Termux:Boot installed from F-Droid (for auto-start)
-# ═══════════════════════════════════════════════════════════════
-
 set -euo pipefail
 
 GOST_VERSION="2.12.0"
 SOCKS_PORT="${SOCKS_PORT:-1080}"
 
-# ── Colors ────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -32,26 +15,22 @@ ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 err()   { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# ── Step 0: Validate environment ─────────────────────────────
 if [ ! -d "/data/data/com.termux" ]; then
     err "This script must be run inside Termux on Android."
     exit 1
 fi
 
 echo ""
-echo "╔═══════════════════════════════════════════════╗"
-echo "║  SmartInfraOps — Phone Proxy Setup            ║"
-echo "║  Tailscale + gost SOCKS5                      ║"
-echo "╚═══════════════════════════════════════════════╝"
+echo "SmartInfraOps - Phone Proxy Setup"
+echo "Tailscale + gost SOCKS5"
+echo "================================="
 echo ""
 
-# ── Step 1: Install packages ─────────────────────────────────
-info "Installing required packages..."
+info "Step 1: Installing required packages..."
 pkg update -y
 pkg install -y wget openssl openssl-tool termux-services cronie
 
-# ── Step 2: Detect Architecture ────────────────────────────────
-info "Detecting CPU architecture..."
+info "Step 2: Detecting CPU architecture..."
 ARCH=$(uname -m)
 case "$ARCH" in
     aarch64|arm64) GOST_ARCH="arm64" ;;
@@ -62,18 +41,17 @@ case "$ARCH" in
         exit 1
         ;;
 esac
-ok "Architecture: $ARCH → ${GOST_ARCH}"
+ok "Architecture: $ARCH -> ${GOST_ARCH}"
 
-# ── Step 3: Install Tailscale ─────────────────────────────────
-info "Installing Tailscale (Static binary)..."
+info "Step 3: Installing Tailscale..."
 if command -v tailscale &> /dev/null; then
     ok "Tailscale already installed: $(tailscale version | head -n1)"
 else
     TS_VERSION="1.68.2"
-    # Map GOST_ARCH to Tailscale arch (they use same naming: arm64, armv7, amd64)
     TS_URL="https://pkgs.tailscale.com/stable/tailscale_${TS_VERSION}_${GOST_ARCH}.tgz"
     info "Downloading Tailscale v${TS_VERSION}..."
-    wget --show-progress -O $PREFIX/tmp/tailscale.tgz "$TS_URL"
+    mkdir -p $PREFIX/tmp
+    wget --tries=3 --timeout=30 --show-progress -O $PREFIX/tmp/tailscale.tgz "$TS_URL"
     tar xzf $PREFIX/tmp/tailscale.tgz -C $PREFIX/tmp
     mv $PREFIX/tmp/tailscale_${TS_VERSION}_${GOST_ARCH}/tailscale "$PREFIX/bin/"
     mv $PREFIX/tmp/tailscale_${TS_VERSION}_${GOST_ARCH}/tailscaled "$PREFIX/bin/"
@@ -81,27 +59,33 @@ else
     ok "Tailscale installed to $PREFIX/bin/"
 fi
 
-# ── Step 4: Download gost ────────────────────────────────────
-
+info "Step 4: Installing gost..."
 if command -v gost &> /dev/null; then
     ok "gost already installed."
 else
     info "Downloading gost v${GOST_VERSION} (${GOST_ARCH})..."
     GOST_FILE="gost_${GOST_VERSION}_linux_${GOST_ARCH}.tar.gz"
-    
-    if wget --tries=3 --timeout=15 --show-progress -O $PREFIX/tmp/gost.tar.gz "https://kkgithub.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/${GOST_FILE}"; then
-        ok "Downloaded successfully"
-    elif wget --tries=3 --timeout=15 --show-progress -O $PREFIX/tmp/gost.tar.gz "https://ghproxy.net/https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/${GOST_FILE}"; then
-        ok "Downloaded via proxy"
-    else
-        err "Download failed. Please check network."
-        exit 1
-    fi
-    
-    # Verify file integrity
-    if ! tar -tzf $PREFIX/tmp/gost.tar.gz &>/dev/null; then
-        err "Downloaded file corrupted (unexpected EOF). Try running script again."
-        rm -f $PREFIX/tmp/gost.tar.gz
+    mkdir -p $PREFIX/tmp
+
+    DOWNLOADED=0
+    for MIRROR in "https://kkgithub.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/${GOST_FILE}" "https://ghproxy.net/https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/${GOST_FILE}" "https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/${GOST_FILE}"; do
+        info "Trying: $MIRROR"
+        if wget --tries=2 --timeout=30 --show-progress -O $PREFIX/tmp/gost.tar.gz "$MIRROR"; then
+            if tar -tzf $PREFIX/tmp/gost.tar.gz &>/dev/null; then
+                DOWNLOADED=1
+                ok "Downloaded and verified OK"
+                break
+            else
+                warn "File corrupted, trying next mirror..."
+                rm -f $PREFIX/tmp/gost.tar.gz
+            fi
+        else
+            warn "Mirror failed, trying next..."
+        fi
+    done
+
+    if [ "$DOWNLOADED" -eq 0 ]; then
+        err "All mirrors failed. Check your network."
         exit 1
     fi
 
@@ -112,7 +96,7 @@ else
     ok "gost installed to $PREFIX/bin/gost"
 fi
 
-# ── Step 5: Generate SOCKS5 credentials ──────────────────────
+info "Step 5: Generating SOCKS5 credentials..."
 CRED_FILE="$HOME/.gost_credentials"
 if [ -f "$CRED_FILE" ]; then
     source "$CRED_FILE"
@@ -123,11 +107,10 @@ else
     echo "SOCKS_USER=\"$SOCKS_USER\"" > "$CRED_FILE"
     echo "SOCKS_PASS=\"$SOCKS_PASS\"" >> "$CRED_FILE"
     chmod 600 "$CRED_FILE"
-    ok "Generated new credentials → $CRED_FILE"
+    ok "Generated new credentials -> $CRED_FILE"
 fi
 
-# ── Step 6: Start Tailscale ──────────────────────────────────
-info "Starting Tailscale daemon (userspace networking)..."
+info "Step 6: Starting Tailscale daemon (userspace networking)..."
 tailscaled --tun=userspace-networking &> $PREFIX/tmp/tailscaled.log &
 sleep 2
 
@@ -149,15 +132,11 @@ if [ -z "$TAILSCALE_IP" ]; then
 fi
 ok "Tailscale IP: $TAILSCALE_IP"
 
-# ── Step 7: Start gost SOCKS5 proxy ─────────────────────────
-info "Starting gost SOCKS5 proxy on ${TAILSCALE_IP}:${SOCKS_PORT}..."
-
-# Kill existing gost if running
+info "Step 7: Starting gost SOCKS5 proxy on ${TAILSCALE_IP}:${SOCKS_PORT}..."
 pkill gost 2>/dev/null || true
 sleep 1
 
-nohup gost -L "socks5://${SOCKS_USER}:${SOCKS_PASS}@${TAILSCALE_IP}:${SOCKS_PORT}" \
-    > $PREFIX/tmp/gost.log 2>&1 &
+nohup gost -L "socks5://${SOCKS_USER}:${SOCKS_PASS}@${TAILSCALE_IP}:${SOCKS_PORT}" > $PREFIX/tmp/gost.log 2>&1 &
 
 sleep 2
 
@@ -169,102 +148,59 @@ else
     exit 1
 fi
 
-# ── Step 8: Setup Termux:Boot auto-start ─────────────────────
-info "Configuring Termux:Boot auto-start..."
+info "Step 8: Creating Termux:Boot auto-start script..."
 BOOT_DIR="$HOME/.termux/boot"
 mkdir -p "$BOOT_DIR"
+BOOT_SCRIPT="$BOOT_DIR/start-proxy.sh"
+echo '#!/data/data/com.termux/files/usr/bin/bash' > "$BOOT_SCRIPT"
+echo 'termux-wake-lock' >> "$BOOT_SCRIPT"
+echo 'tailscaled --tun=userspace-networking &> $PREFIX/tmp/tailscaled.log &' >> "$BOOT_SCRIPT"
+echo 'sleep 5' >> "$BOOT_SCRIPT"
+echo 'tailscale up --hostname=smartinfra-phone' >> "$BOOT_SCRIPT"
+echo 'for i in $(seq 1 30); do' >> "$BOOT_SCRIPT"
+echo '    TAILSCALE_IP=$(tailscale ip -4 2>/dev/null || echo "")' >> "$BOOT_SCRIPT"
+echo '    if [ -n "$TAILSCALE_IP" ]; then break; fi' >> "$BOOT_SCRIPT"
+echo '    sleep 2' >> "$BOOT_SCRIPT"
+echo 'done' >> "$BOOT_SCRIPT"
+echo 'if [ -z "$TAILSCALE_IP" ]; then exit 1; fi' >> "$BOOT_SCRIPT"
+echo 'source "$HOME/.gost_credentials"' >> "$BOOT_SCRIPT"
+echo 'nohup gost -L "socks5://${SOCKS_USER}:${SOCKS_PASS}@${TAILSCALE_IP}:1080" > $PREFIX/tmp/gost.log 2>&1 &' >> "$BOOT_SCRIPT"
+chmod +x "$BOOT_SCRIPT"
+ok "Boot script created: $BOOT_SCRIPT"
 
-cat > "$BOOT_DIR/start-proxy.sh" << 'BOOTEOF'
-#!/data/data/com.termux/files/usr/bin/bash
-# Auto-start script for Termux:Boot
-# Starts Tailscale + gost on phone boot
-
-termux-wake-lock
-
-# Start Tailscale in userspace mode
-tailscaled --tun=userspace-networking &> $PREFIX/tmp/tailscaled.log &
-sleep 5
-tailscale up --hostname=smartinfra-phone
-
-# Wait for Tailscale IP
-for i in $(seq 1 30); do
-    TAILSCALE_IP=$(tailscale ip -4 2>/dev/null || echo "")
-    if [ -n "$TAILSCALE_IP" ]; then
-        break
-    fi
-    sleep 2
-done
-
-if [ -z "$TAILSCALE_IP" ]; then
-    echo "$(date) - Failed to get Tailscale IP" >> $PREFIX/tmp/gost_watchdog.log
-    exit 1
-fi
-
-# Load credentials
-source "$HOME/.gost_credentials"
-
-# Start gost
-nohup gost -L "socks5://${SOCKS_USER}:${SOCKS_PASS}@${TAILSCALE_IP}:1080" \
-    > $PREFIX/tmp/gost.log 2>&1 &
-
-echo "$(date) - Proxy started on ${TAILSCALE_IP}:1080" >> $PREFIX/tmp/gost_watchdog.log
-BOOTEOF
-
-chmod +x "$BOOT_DIR/start-proxy.sh"
-ok "Boot script created: $BOOT_DIR/start-proxy.sh"
-
-# ── Step 9: Setup watchdog cron ──────────────────────────────
-info "Setting up watchdog cron (every 5 minutes)..."
-
+info "Step 9: Creating watchdog cron script..."
 WATCHDOG_SCRIPT="$HOME/gost-watchdog.sh"
-cat > "$WATCHDOG_SCRIPT" << 'WDEOF'
-#!/data/data/com.termux/files/usr/bin/bash
-# Watchdog: restart gost if it's dead
-if ! pgrep gost > /dev/null; then
-    echo "$(date) - gost DOWN, restarting..." >> $PREFIX/tmp/gost_watchdog.log
-    source "$HOME/.gost_credentials"
-    TAILSCALE_IP=$(tailscale ip -4 2>/dev/null || echo "")
-    if [ -n "$TAILSCALE_IP" ]; then
-        nohup gost -L "socks5://${SOCKS_USER}:${SOCKS_PASS}@${TAILSCALE_IP}:1080" \
-            > $PREFIX/tmp/gost.log 2>&1 &
-        echo "$(date) - gost restarted on ${TAILSCALE_IP}:1080" >> $PREFIX/tmp/gost_watchdog.log
-    else
-        echo "$(date) - No Tailscale IP, cannot restart gost" >> $PREFIX/tmp/gost_watchdog.log
-    fi
-fi
-WDEOF
+echo '#!/data/data/com.termux/files/usr/bin/bash' > "$WATCHDOG_SCRIPT"
+echo 'if ! pgrep gost > /dev/null; then' >> "$WATCHDOG_SCRIPT"
+echo '    source "$HOME/.gost_credentials"' >> "$WATCHDOG_SCRIPT"
+echo '    TAILSCALE_IP=$(tailscale ip -4 2>/dev/null || echo "")' >> "$WATCHDOG_SCRIPT"
+echo '    if [ -n "$TAILSCALE_IP" ]; then' >> "$WATCHDOG_SCRIPT"
+echo '        nohup gost -L "socks5://${SOCKS_USER}:${SOCKS_PASS}@${TAILSCALE_IP}:1080" > $PREFIX/tmp/gost.log 2>&1 &' >> "$WATCHDOG_SCRIPT"
+echo '    fi' >> "$WATCHDOG_SCRIPT"
+echo 'fi' >> "$WATCHDOG_SCRIPT"
 chmod +x "$WATCHDOG_SCRIPT"
 
-# Add to crontab
 (crontab -l 2>/dev/null | grep -v gost-watchdog; echo "*/5 * * * * $WATCHDOG_SCRIPT") | crontab -
 sv-enable crond 2>/dev/null || true
 ok "Watchdog cron installed (every 5 min)."
 
-# ── Step 10: Enable wake lock ─────────────────────────────────
-info "Acquiring Termux wake lock (prevents background kill)..."
+info "Step 10: Acquiring wake lock..."
 termux-wake-lock 2>/dev/null || warn "termux-wake-lock not available. Install Termux:API from F-Droid."
 
-# ── Done! ─────────────────────────────────────────────────────
 echo ""
-echo "╔═══════════════════════════════════════════════════════════╗"
-echo "║  ✅ Setup Complete!                                       ║"
-echo "╠═══════════════════════════════════════════════════════════╣"
-echo "║                                                           ║"
-echo "║  Proxy endpoint:                                          ║"
-echo "║  socks5://${SOCKS_USER}:${SOCKS_PASS}@${TAILSCALE_IP}:${SOCKS_PORT}"
-echo "║                                                           ║"
-echo "║  ┌─────────────────────────────────────────────┐          ║"
-echo "║  │ Add these to GitHub Secrets:                 │          ║"
-echo "║  │                                              │          ║"
-echo "║  │  PROXY_TAILSCALE_IP = ${TAILSCALE_IP}        │          ║"
-echo "║  │  SOCKS_USER         = ${SOCKS_USER}          │          ║"
-echo "║  │  SOCKS_PASS         = ${SOCKS_PASS}          │          ║"
-echo "║  └─────────────────────────────────────────────┘          ║"
-echo "║                                                           ║"
-echo "║  ⚠️  Android Settings (IMPORTANT):                        ║"
-echo "║  1. Settings → Battery → Termux → Unrestricted            ║"
-echo "║  2. Settings → Battery → Tailscale → Unrestricted         ║"
-echo "║  3. Recent apps → Lock Termux (tap 🔒)                   ║"
-echo "║                                                           ║"
-echo "╚═══════════════════════════════════════════════════════════╝"
+echo "================================="
+echo "  Setup Complete!"
+echo "================================="
+echo ""
+echo "  Proxy: socks5://${SOCKS_USER}:${SOCKS_PASS}@${TAILSCALE_IP}:${SOCKS_PORT}"
+echo ""
+echo "  Add these to GitHub Secrets:"
+echo "    PROXY_TAILSCALE_IP = ${TAILSCALE_IP}"
+echo "    SOCKS_USER         = ${SOCKS_USER}"
+echo "    SOCKS_PASS         = ${SOCKS_PASS}"
+echo ""
+echo "  Android Settings (IMPORTANT):"
+echo "    1. Settings > Battery > Termux > Unrestricted"
+echo "    2. Settings > Battery > Tailscale > Unrestricted"
+echo "    3. Recent apps > Lock Termux (tap lock icon)"
 echo ""
