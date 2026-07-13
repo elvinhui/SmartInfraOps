@@ -73,11 +73,11 @@ else
     # Map GOST_ARCH to Tailscale arch (they use same naming: arm64, armv7, amd64)
     TS_URL="https://pkgs.tailscale.com/stable/tailscale_${TS_VERSION}_${GOST_ARCH}.tgz"
     info "Downloading Tailscale v${TS_VERSION}..."
-    wget -q --show-progress -O /tmp/tailscale.tgz "$TS_URL"
-    tar xzf /tmp/tailscale.tgz -C /tmp
-    mv /tmp/tailscale_${TS_VERSION}_${GOST_ARCH}/tailscale "$PREFIX/bin/"
-    mv /tmp/tailscale_${TS_VERSION}_${GOST_ARCH}/tailscaled "$PREFIX/bin/"
-    rm -rf /tmp/tailscale*
+    wget -q --show-progress -O $PREFIX/tmp/tailscale.tgz "$TS_URL"
+    tar xzf $PREFIX/tmp/tailscale.tgz -C $PREFIX/tmp
+    mv $PREFIX/tmp/tailscale_${TS_VERSION}_${GOST_ARCH}/tailscale "$PREFIX/bin/"
+    mv $PREFIX/tmp/tailscale_${TS_VERSION}_${GOST_ARCH}/tailscaled "$PREFIX/bin/"
+    rm -rf $PREFIX/tmp/tailscale*
     ok "Tailscale installed to $PREFIX/bin/"
 fi
 
@@ -88,10 +88,10 @@ if command -v gost &> /dev/null; then
 else
     info "Downloading gost v${GOST_VERSION} (${GOST_ARCH})..."
     GOST_URL="https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost-linux-${GOST_ARCH}-${GOST_VERSION}.gz"
-    wget -q --show-progress -O /tmp/gost.gz "$GOST_URL"
-    gzip -d /tmp/gost.gz
-    chmod +x /tmp/gost
-    mv /tmp/gost "$PREFIX/bin/gost"
+    wget -q --show-progress -O $PREFIX/tmp/gost.gz "$GOST_URL"
+    gzip -d $PREFIX/tmp/gost.gz
+    chmod +x $PREFIX/tmp/gost
+    mv $PREFIX/tmp/gost "$PREFIX/bin/gost"
     ok "gost installed to $PREFIX/bin/gost"
 fi
 
@@ -111,7 +111,7 @@ fi
 
 # ── Step 6: Start Tailscale ──────────────────────────────────
 info "Starting Tailscale daemon (userspace networking)..."
-tailscaled --tun=userspace-networking &> /tmp/tailscaled.log &
+tailscaled --tun=userspace-networking &> $PREFIX/tmp/tailscaled.log &
 sleep 2
 
 if tailscale status &> /dev/null; then
@@ -140,15 +140,15 @@ pkill gost 2>/dev/null || true
 sleep 1
 
 nohup gost -L "socks5://${SOCKS_USER}:${SOCKS_PASS}@${TAILSCALE_IP}:${SOCKS_PORT}" \
-    > /tmp/gost.log 2>&1 &
+    > $PREFIX/tmp/gost.log 2>&1 &
 
 sleep 2
 
 if pgrep gost > /dev/null; then
     ok "gost is running! (PID: $(pgrep gost))"
 else
-    err "gost failed to start. Check /tmp/gost.log"
-    cat /tmp/gost.log
+    err "gost failed to start. Check $PREFIX/tmp/gost.log"
+    cat $PREFIX/tmp/gost.log
     exit 1
 fi
 
@@ -165,7 +165,7 @@ cat > "$BOOT_DIR/start-proxy.sh" << 'BOOTEOF'
 termux-wake-lock
 
 # Start Tailscale in userspace mode
-tailscaled --tun=userspace-networking &> /tmp/tailscaled.log &
+tailscaled --tun=userspace-networking &> $PREFIX/tmp/tailscaled.log &
 sleep 5
 tailscale up --hostname=smartinfra-phone
 
@@ -179,7 +179,7 @@ for i in $(seq 1 30); do
 done
 
 if [ -z "$TAILSCALE_IP" ]; then
-    echo "$(date) - Failed to get Tailscale IP" >> /tmp/gost_watchdog.log
+    echo "$(date) - Failed to get Tailscale IP" >> $PREFIX/tmp/gost_watchdog.log
     exit 1
 fi
 
@@ -188,9 +188,9 @@ source "$HOME/.gost_credentials"
 
 # Start gost
 nohup gost -L "socks5://${SOCKS_USER}:${SOCKS_PASS}@${TAILSCALE_IP}:1080" \
-    > /tmp/gost.log 2>&1 &
+    > $PREFIX/tmp/gost.log 2>&1 &
 
-echo "$(date) - Proxy started on ${TAILSCALE_IP}:1080" >> /tmp/gost_watchdog.log
+echo "$(date) - Proxy started on ${TAILSCALE_IP}:1080" >> $PREFIX/tmp/gost_watchdog.log
 BOOTEOF
 
 chmod +x "$BOOT_DIR/start-proxy.sh"
@@ -204,15 +204,15 @@ cat > "$WATCHDOG_SCRIPT" << 'WDEOF'
 #!/data/data/com.termux/files/usr/bin/bash
 # Watchdog: restart gost if it's dead
 if ! pgrep gost > /dev/null; then
-    echo "$(date) - gost DOWN, restarting..." >> /tmp/gost_watchdog.log
+    echo "$(date) - gost DOWN, restarting..." >> $PREFIX/tmp/gost_watchdog.log
     source "$HOME/.gost_credentials"
     TAILSCALE_IP=$(tailscale ip -4 2>/dev/null || echo "")
     if [ -n "$TAILSCALE_IP" ]; then
         nohup gost -L "socks5://${SOCKS_USER}:${SOCKS_PASS}@${TAILSCALE_IP}:1080" \
-            > /tmp/gost.log 2>&1 &
-        echo "$(date) - gost restarted on ${TAILSCALE_IP}:1080" >> /tmp/gost_watchdog.log
+            > $PREFIX/tmp/gost.log 2>&1 &
+        echo "$(date) - gost restarted on ${TAILSCALE_IP}:1080" >> $PREFIX/tmp/gost_watchdog.log
     else
-        echo "$(date) - No Tailscale IP, cannot restart gost" >> /tmp/gost_watchdog.log
+        echo "$(date) - No Tailscale IP, cannot restart gost" >> $PREFIX/tmp/gost_watchdog.log
     fi
 fi
 WDEOF
