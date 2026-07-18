@@ -187,7 +187,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
         for load_check in range(10):
             page_ready = driver.execute_script("""
                 // Check if page has proper styling (not a degraded/unstyled page)
-                var hasStylesheets = document.styleSheets.length > 2;
+                var hasStylesheets = document.styleSheets.length >= 2;
                 var hasImportBtn = !!Array.from(document.querySelectorAll('button')).find(
                     b => (b.innerText || '').toLowerCase().includes('import')
                 );
@@ -226,7 +226,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                     var rect = divs[i].getBoundingClientRect();
                     if (rect.width > 0 && rect.height > 0 && rect.top > 100) {
                         // Only accept div if the page appears fully loaded
-                        if (document.styleSheets.length > 2) return divs[i];
+                        if (document.styleSheets.length >= 2) return divs[i];
                     }
                 }
                 return null;
