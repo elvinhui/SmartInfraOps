@@ -363,17 +363,29 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
         print("Waiting for Medium to autosave...")
         for save_attempt in range(60):
             save_status = driver.execute_script("""
+                var isSaving = false;
                 var spans = document.querySelectorAll('span');
                 for (var i = 0; i < spans.length; i++) {
                     var txt = (spans[i].innerText || spans[i].textContent || '').toLowerCase().trim();
-                    if (txt.includes('saving...')) return 'saving';
-                    if (txt.includes('saved')) return 'ready';
+                    if (txt.includes('saving...')) isSaving = true;
                 }
                 var btns = document.querySelectorAll('button');
                 for (var i = 0; i < btns.length; i++) {
                     var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
-                    if (txt.includes('saving...')) return 'saving';
-                    if (txt === 'publish' || txt === 'publish and send') return 'ready';
+                    if (txt.includes('saving...')) isSaving = true;
+                }
+                if (isSaving) return 'saving';
+                
+                for (var i = 0; i < btns.length; i++) {
+                    var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
+                    if ((txt === 'publish' || txt === 'publish and send') && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled')) {
+                        return 'ready';
+                    }
+                }
+                
+                for (var i = 0; i < spans.length; i++) {
+                    var txt = (spans[i].innerText || spans[i].textContent || '').toLowerCase().trim();
+                    if (txt === 'saved' || txt === 'saved to drafts') return 'ready';
                 }
                 return 'unknown';
             """)
@@ -401,10 +413,13 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                 var btns = document.querySelectorAll('button');
                 for (var i = 0; i < btns.length; i++) {
                     var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
-                    if (txt.includes('publish') && !txt.includes('publish now') && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled') && btns[i].offsetParent !== null) {
-                        btns[i].scrollIntoView({behavior: 'instant', block: 'center'});
-                        btns[i].click();
-                        return;
+                    if (txt.includes('publish') && !txt.includes('publish now') && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled')) {
+                        var rect = btns[i].getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0) {
+                            btns[i].scrollIntoView({behavior: 'instant', block: 'center'});
+                            btns[i].click();
+                            return;
+                        }
                     }
                 }
             """)
@@ -413,13 +428,13 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             # Check if modal is open by looking for VISIBLE topics input or "Publish now" button
             modal_open = driver.execute_script("""
                 var el = document.querySelector('input[placeholder="Add a topic..."], input[aria-controls="tagMultiSelectMenu"]');
-                var isElVisible = el && el.offsetParent !== null;
+                var isElVisible = el && el.getBoundingClientRect().width > 0;
                 
                 var btns = document.querySelectorAll('button');
-                var publishNow = Array.from(btns).some(b => (b.innerText || '').toLowerCase().trim().includes('publish now') && b.offsetParent !== null);
+                var publishNow = Array.from(btns).some(b => (b.innerText || '').toLowerCase().trim().includes('publish now') && b.getBoundingClientRect().width > 0);
                 
                 var overlays = document.querySelectorAll('[role="dialog"], [class*="overlay"]');
-                var isOverlayVisible = Array.from(overlays).some(o => o.offsetParent !== null);
+                var isOverlayVisible = Array.from(overlays).some(o => o.getBoundingClientRect().width > 0);
                 return isElVisible || publishNow || isOverlayVisible;
             """)
             
