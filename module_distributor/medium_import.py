@@ -383,10 +383,6 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                     }
                 }
                 
-                for (var i = 0; i < spans.length; i++) {
-                    var txt = (spans[i].innerText || spans[i].textContent || '').toLowerCase().trim();
-                    if (txt === 'saved' || txt === 'saved to drafts') return 'ready';
-                }
                 return 'unknown';
             """)
             if save_status == 'ready':
@@ -408,20 +404,32 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
         print("Waiting for Publish button and modal...")
         publish_clicked = False
         for attempt in range(20):
-            # Click the publish button
+            # Try clicking the publish button via JS MouseEvent to ensure React handles it
             driver.execute_script("""
                 var btns = document.querySelectorAll('button');
+                var clickedAny = false;
                 for (var i = 0; i < btns.length; i++) {
                     var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
                     if (txt.includes('publish') && !txt.includes('publish now') && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled')) {
                         var rect = btns[i].getBoundingClientRect();
                         if (rect.width > 0 && rect.height > 0) {
-                            btns[i].scrollIntoView({behavior: 'instant', block: 'center'});
-                            btns[i].click();
-                            return;
+                            var style = window.getComputedStyle(btns[i]);
+                            if (style.visibility !== 'hidden' && style.opacity !== '0') {
+                                btns[i].scrollIntoView({behavior: 'instant', block: 'center'});
+                                // Fire a native-like mouse event
+                                var event = new MouseEvent('click', {
+                                    view: window,
+                                    bubbles: true,
+                                    cancelable: true
+                                });
+                                btns[i].dispatchEvent(event);
+                                clickedAny = true;
+                                break; // Only click the first visible one
+                            }
                         }
                     }
                 }
+                return clickedAny;
             """)
             time.sleep(2)
             
@@ -446,6 +454,25 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             print(f"Publish modal not open after attempt {attempt + 1}, retrying click...")
 
         if not publish_clicked:
+            # Dump info about buttons to debug why it failed
+            debug_info = driver.execute_script("""
+                var info = [];
+                var btns = document.querySelectorAll('button');
+                for(var i=0; i<btns.length; i++) {
+                    var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
+                    if(txt.includes('publish')) {
+                        info.push({
+                            text: txt,
+                            disabled: btns[i].disabled,
+                            ariaDisabled: btns[i].getAttribute('aria-disabled'),
+                            rect: btns[i].getBoundingClientRect().toJSON(),
+                            style: window.getComputedStyle(btns[i]).visibility
+                        });
+                    }
+                }
+                return info;
+            """)
+            print("DEBUG: Publish buttons found on screen: ", json.dumps(debug_info, indent=2))
             driver.save_screenshot("module_distributor/error_medium_no_publish.png")
             raise Exception("Publish button not found or modal failed to open after waiting.")
 
