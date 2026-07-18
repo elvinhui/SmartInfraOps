@@ -224,11 +224,17 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         driver.execute_script("""
                             if (arguments[0].tagName.toLowerCase() === 'div') {
                                 arguments[0].innerHTML = '<p>' + arguments[1] + '</p>';
+                                arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
                             } else {
-                                arguments[0].value = arguments[1];
+                                var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                                if (nativeInputValueSetter) {
+                                    nativeInputValueSetter.call(arguments[0], arguments[1]);
+                                } else {
+                                    arguments[0].value = arguments[1];
+                                }
+                                arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+                                arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
                             }
-                            arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
-                            arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
                         """, input_elem, canonical_url)
                     
                     found_input = True
