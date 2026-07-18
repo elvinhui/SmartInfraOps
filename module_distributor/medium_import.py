@@ -512,44 +512,42 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
         # Extra stabilization wait before clicking publish
         time.sleep(3)
 
-        print("Waiting for Publish button and modal...")
+        print("Waiting for Publish button and clicking...")
         publish_clicked = False
-        for attempt in range(20):
-            # Diagnose page state on each attempt
+        editor_url = driver.current_url
+        
+        for attempt in range(10):
             page_state = driver.execute_script("""
                 return {
                     buttonCount: document.querySelectorAll('button').length,
-                    url: window.location.href,
-                    hasEditor: !!document.querySelector('[contenteditable="true"]')
+                    url: window.location.href
                 };
             """)
             
-            # If the page has crashed (0 buttons), try to recover
+            # If page crashed (0 buttons), refresh and retry
             if page_state.get('buttonCount', 0) == 0:
                 print(f"Attempt {attempt + 1}: Page crashed (0 buttons). Refreshing...")
                 driver.refresh()
                 time.sleep(10)
                 continue
             
-            # Try to find the publish button using Medium's actual CSS selectors
+            # Check if we already navigated away from editor (publish succeeded)
+            current_url = page_state.get('url', '')
+            if 'post_submit' in current_url or ('postPublishedType' in current_url):
+                print(f"Attempt {attempt + 1}: Already on post-publish page. Publish succeeded!")
+                publish_clicked = True
+                break
+            
+            # Find the publish button
             publish_btn = driver.execute_script("""
-                // Method 1: CSS selector from real Medium DOM
                 var btn = document.querySelector('button[data-action="show-prepublish"]');
-                if (btn) {
-                    btn.scrollIntoView({behavior: 'instant', block: 'center'});
-                    return btn;
-                }
-                // Method 2: class-based selector
+                if (btn) { btn.scrollIntoView({behavior: 'instant', block: 'center'}); return btn; }
                 btn = document.querySelector('button.button--publish');
-                if (btn) {
-                    btn.scrollIntoView({behavior: 'instant', block: 'center'});
-                    return btn;
-                }
-                // Method 3: text-based fallback
+                if (btn) { btn.scrollIntoView({behavior: 'instant', block: 'center'}); return btn; }
                 var btns = document.querySelectorAll('button');
                 for (var i = 0; i < btns.length; i++) {
-                    var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
-                    if (txt.includes('publish') && !txt.includes('publish now')) {
+                    var txt = (btns[i].innerText || '').toLowerCase().trim();
+                    if (txt === 'publish' || txt === 'publish and send') {
                         var rect = btns[i].getBoundingClientRect();
                         if (rect.width > 0 && rect.height > 0) {
                             btns[i].scrollIntoView({behavior: 'instant', block: 'center'});
@@ -563,165 +561,113 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             if publish_btn:
                 print(f"Attempt {attempt + 1}: Publish button found. Clicking...")
                 try:
-                    actions = ActionChains(driver)
-                    actions.move_to_element(publish_btn).click().perform()
+                    ActionChains(driver).move_to_element(publish_btn).click().perform()
                 except Exception as e:
-                    print(f"ActionChains click failed: {e}. Trying JS click...")
+                    print(f"ActionChains click failed: {e}. JS fallback...")
                     driver.execute_script("arguments[0].click();", publish_btn)
             else:
-                print(f"Attempt {attempt + 1}: Publish button not found ({page_state.get('buttonCount', '?')} buttons on page).")
-                    
-            time.sleep(3)
+                print(f"Attempt {attempt + 1}: Publish button not found ({page_state.get('buttonCount', '?')} buttons).")
             
-            # Check if modal is open
+            # Wait for navigation or modal to appear
+            time.sleep(5)
+            
+            # Check if URL changed (Medium's new flow: navigates to Story Preview page)
+            new_url = driver.current_url
+            if new_url != editor_url and '/edit' not in new_url:
+                print(f"Page navigated to: {new_url}")
+                publish_clicked = True
+                break
+            
+            # Also check for old-style modal (in case Medium uses both flows)
             modal_open = driver.execute_script("""
-                // Check for prepublish dialog/overlay
                 var dialog = document.querySelector('[role="dialog"], .overlay-content, .js-prepublishDialogContent');
                 if (dialog && dialog.getBoundingClientRect().width > 0) return true;
-                
-                var el = document.querySelector('input[placeholder="Add a topic..."], input[aria-controls="tagMultiSelectMenu"]');
+                var el = document.querySelector('input[placeholder="Add a topic..."]');
                 if (el && el.getBoundingClientRect().width > 0) return true;
-                
                 var btns = document.querySelectorAll('button');
                 for (var i = 0; i < btns.length; i++) {
                     var txt = (btns[i].innerText || '').toLowerCase().trim();
                     if (txt.includes('publish now') && btns[i].getBoundingClientRect().width > 0) return true;
                 }
-                
                 return false;
             """)
-            
             if modal_open:
                 publish_clicked = True
-                print("Publish modal successfully opened.")
+                print("Old-style publish modal detected.")
                 break
-                
-            print(f"Publish modal not open after attempt {attempt + 1}, retrying click...")
+            
+            print(f"Publish modal/navigation not detected after attempt {attempt + 1}, retrying...")
 
         if not publish_clicked:
-            # Comprehensive debug dump
             debug_info = driver.execute_script("""
-                var info = {
-                    url: window.location.href,
-                    title: document.title,
-                    bodyLen: document.body ? document.body.innerHTML.length : 0,
-                    totalButtons: document.querySelectorAll('button').length,
-                    publishButtons: [],
-                    allButtonTexts: []
-                };
                 var btns = document.querySelectorAll('button');
+                var texts = [];
                 for(var i=0; i<btns.length && i<30; i++) {
-                    var txt = (btns[i].innerText || btns[i].textContent || '').trim().substring(0, 50);
-                    info.allButtonTexts.push(txt);
-                    if(txt.toLowerCase().includes('publish')) {
-                        info.publishButtons.push({
-                            text: txt,
-                            disabled: btns[i].disabled,
-                            classes: btns[i].className.substring(0, 100),
-                            dataAction: btns[i].getAttribute('data-action'),
-                            rect: btns[i].getBoundingClientRect().toJSON()
-                        });
-                    }
+                    texts.push((btns[i].innerText || '').trim().substring(0, 50));
                 }
-                return info;
+                return { url: window.location.href, totalButtons: btns.length, allButtonTexts: texts };
             """)
-            print("DEBUG FULL PAGE STATE:", json.dumps(debug_info, indent=2))
+            print("DEBUG:", json.dumps(debug_info, indent=2))
             driver.save_screenshot("module_distributor/error_medium_no_publish.png")
-            raise Exception("Publish button not found or modal failed to open after waiting.")
+            raise Exception("Publish button not found or navigation failed after waiting.")
 
-        time.sleep(5)
+        time.sleep(3)
+
+        # ── Step 8: Handle Story Preview page (Medium's new publish flow) ─────
+        # Medium now navigates to a "Story Preview" page after clicking Publish.
+        # On this page we can add topics and click the final "Publish" button.
+        current_url = driver.current_url
+        is_story_preview = 'post_submit' in current_url or 'postPublishedType' in current_url
+        
+        if is_story_preview:
+            print("On Story Preview page (Medium's new publish flow).")
+        else:
+            print("On publish modal (old flow).")
 
         # Add Topics (up to 5 allowed on Medium)
         if topics is None:
             topics = ["Technology", "DevOps", "Infrastructure", "Python", "Cloud"]
         else:
-            # Fallback if the topics list is empty, otherwise take the first 5 topics
             topics = topics[:5] if topics else ["Technology", "DevOps", "Infrastructure", "Python", "Cloud"]
             
         print(f"Adding topics: {topics}...")
         try:
-            # The topic combobox only appears after Medium's publish modal fully renders.
-            # The modal container can be taller than the viewport (especially in headless
-            # 1280x800), so the topic section at the bottom may not be in the DOM or
-            # visible until we scroll the modal container down.
             topic_input = None
-            for attempt in range(20):
-                # Scroll the publish modal container down to reveal the topic section.
-                # Medium wraps the publish form in a scrollable overlay/dialog.
+            for t_attempt in range(15):
+                # Scroll to find topic input
                 driver.execute_script("""
-                    // Try to scroll the modal/overlay that contains the publish form.
-                    // Medium uses a few different container patterns:
-                    
-                    // 1. Look for the Topics heading text and scroll it into view
                     var allText = document.querySelectorAll('p, h3, h4, label, span, div');
                     for (var i = 0; i < allText.length; i++) {
                         var txt = (allText[i].textContent || '').trim();
-                        if (txt === 'Topics' || txt === 'Add up to five topics to help readers find your story.') {
+                        if (txt === 'Topics' || txt.includes('Add up to five topics')) {
                             allText[i].scrollIntoView({behavior: 'instant', block: 'center'});
                             return;
                         }
                     }
-                    
-                    // 2. Scroll any scrollable overlay/dialog container
-                    var overlays = document.querySelectorAll('[role="dialog"], [class*="overlay"], [class*="modal"]');
-                    for (var i = 0; i < overlays.length; i++) {
-                        if (overlays[i].scrollHeight > overlays[i].clientHeight) {
-                            overlays[i].scrollTop = overlays[i].scrollHeight;
-                            return;
-                        }
-                    }
-                    
-                    // 3. Fallback: scroll any large scrollable div
-                    var divs = document.querySelectorAll('div');
-                    for (var i = 0; i < divs.length; i++) {
-                        var d = divs[i];
-                        if (d.scrollHeight > d.clientHeight + 100 && d.scrollHeight > 500) {
-                            d.scrollTop = d.scrollHeight;
-                            return;
-                        }
-                    }
-                    
-                    // 4. Last resort: scroll the page itself
                     window.scrollTo(0, document.body.scrollHeight);
                 """)
                 time.sleep(1)
 
                 topic_input = driver.execute_script("""
-                    // Primary: exact match from DOM inspection
                     var el = document.querySelector('input[role="combobox"][aria-controls="tagMultiSelectMenu"]');
                     if (el) return el;
-                    
-                    // Secondary: placeholder match
                     el = document.querySelector('input[placeholder="Add a topic..."]');
                     if (el) return el;
-                    
-                    // Tertiary: aria-describedby match (from observed DOM)
-                    el = document.querySelector('input[aria-describedby="tagMultiSelectMenu"]');
-                    if (el) return el;
-                    
-                    // Quaternary: broad scan for any topic/tag input
                     var inputs = document.querySelectorAll('input');
                     for (var i = 0; i < inputs.length; i++) {
                         var ph = (inputs[i].placeholder || '').toLowerCase();
-                        if (ph.includes('topic') || ph.includes('tag')) {
-                            return inputs[i];
-                        }
+                        if (ph.includes('topic') || ph.includes('tag')) return inputs[i];
                     }
                     return null;
                 """)
                 if topic_input:
-                    print(f"Found topic input on attempt {attempt + 1}.")
+                    print(f"Found topic input on attempt {t_attempt + 1}.")
                     break
-                if attempt % 5 == 4:
-                    print(f"Topic input not found after {attempt + 1} attempts, still trying...")
                 time.sleep(1)
             
             if topic_input:
-                driver.save_screenshot("module_distributor/debug_topic_input_found.png")
                 driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", topic_input)
                 time.sleep(1.0)
-                
-                # Use ActionChains to click and type, which is more reliable for React inputs
                 actions = ActionChains(driver)
                 actions.move_to_element(topic_input).click()
                 actions.pause(0.5)
@@ -729,56 +675,46 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                     for char in topic:
                         actions.send_keys(char)
                         actions.pause(random.uniform(0.05, 0.15))
-                    actions.pause(random.uniform(2.0, 3.0))  # Wait for autocomplete suggestions
+                    actions.pause(random.uniform(2.0, 3.0))
                     actions.send_keys(Keys.RETURN)
                     actions.pause(random.uniform(0.8, 1.5))
                 actions.perform()
                 print("Topics added successfully.")
             else:
-                driver.save_screenshot("module_distributor/error_topic_not_found.png")
-                print("Topic input field not found after 20 attempts.")
-                # Debug: dump all inputs found in the page
-                debug_inputs = driver.execute_script("""
-                    var inputs = document.querySelectorAll('input');
-                    var info = [];
-                    for (var i = 0; i < inputs.length; i++) {
-                        info.push({
-                            placeholder: inputs[i].placeholder || '',
-                            role: inputs[i].getAttribute('role') || '',
-                            type: inputs[i].type || '',
-                            visible: inputs[i].offsetParent !== null,
-                            rect: inputs[i].getBoundingClientRect().toJSON()
-                        });
-                    }
-                    return JSON.stringify(info, null, 2);
-                """)
-                print(f"Debug - all inputs on page: {debug_inputs}")
+                print("Topic input not found. Proceeding without topics.")
         except Exception as e:
             print(f"Warning: Failed to add topics: {e}")
 
-        # Click "Publish now" in the confirmation modal
-        print("Clicking final 'Publish now' button...")
-        driver.execute_script("""
-            var btns = Array.from(document.querySelectorAll('button'));
-            var btn = btns.find(b => {
-                var txt = (b.innerText || b.textContent || '').toLowerCase().trim();
-                return txt.includes('publish now');
-            });
-            if (btn) {
-                btn.click();
-                return;
+        # ── Step 9: Click final Publish button ────────────────────────────────
+        # On the Story Preview page, click the green "Publish" button to finalize.
+        # On old modal, click "Publish now".
+        print("Clicking final Publish button...")
+        final_publish_btn = driver.execute_script("""
+            var btns = document.querySelectorAll('button');
+            // First look for "Publish now" (old flow)
+            for (var i = 0; i < btns.length; i++) {
+                var txt = (btns[i].innerText || '').toLowerCase().trim();
+                if (txt.includes('publish now') && btns[i].getBoundingClientRect().width > 0) return btns[i];
             }
-            // Fallback: last button with text 'publish'
-            var pubs = btns.filter(b => {
-                var txt = (b.innerText || b.textContent || '').toLowerCase().trim();
-                return txt === 'publish';
-            });
-            if (pubs.length > 0) {
-                pubs[pubs.length - 1].click();
+            // Then look for "Publish" (new Story Preview flow)
+            for (var i = 0; i < btns.length; i++) {
+                var txt = (btns[i].innerText || '').toLowerCase().trim();
+                if (txt === 'publish' && btns[i].getBoundingClientRect().width > 0) return btns[i];
             }
+            return null;
         """)
+        
+        if final_publish_btn:
+            try:
+                ActionChains(driver).move_to_element(final_publish_btn).click().perform()
+                print("Final Publish button clicked.")
+            except Exception as e:
+                print(f"ActionChains failed on final publish: {e}. JS fallback...")
+                driver.execute_script("arguments[0].click();", final_publish_btn)
+        else:
+            print("Warning: Final Publish button not found. Article may already be published.")
 
-        # Wait for redirect away from editor
+        # Wait for redirect/confirmation
         print("Waiting for publish to complete...")
         for _ in range(20):
             cur = driver.current_url
