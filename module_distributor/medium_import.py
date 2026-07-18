@@ -311,7 +311,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             polished_markdown = re.sub(r'\n{3,}', '\n\n', polished_markdown)
             
             # Convert Markdown to HTML so Medium parses it correctly as rich text
-            polished_html = markdown.markdown(polished_markdown, extensions=['fenced_code', 'codehilite', 'tables'])
+            polished_html = markdown.markdown(polished_markdown, extensions=['fenced_code'])
             
             # Put polished HTML into clipboard (WITHOUT title, since we type title manually)
             _set_clipboard(polished_html, is_html=True)
