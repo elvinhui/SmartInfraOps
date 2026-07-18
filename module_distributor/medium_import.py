@@ -404,10 +404,9 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
         print("Waiting for Publish button and modal...")
         publish_clicked = False
         for attempt in range(20):
-            # Try clicking the publish button via JS MouseEvent to ensure React handles it
-            driver.execute_script("""
+            # Try to get the publish button element to perform a trusted click
+            publish_btn = driver.execute_script("""
                 var btns = document.querySelectorAll('button');
-                var clickedAny = false;
                 for (var i = 0; i < btns.length; i++) {
                     var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
                     if (txt.includes('publish') && !txt.includes('publish now') && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled')) {
@@ -416,22 +415,24 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                             var style = window.getComputedStyle(btns[i]);
                             if (style.visibility !== 'hidden' && style.opacity !== '0') {
                                 btns[i].scrollIntoView({behavior: 'instant', block: 'center'});
-                                // Fire a native-like mouse event
-                                var event = new MouseEvent('click', {
-                                    view: window,
-                                    bubbles: true,
-                                    cancelable: true
-                                });
-                                btns[i].dispatchEvent(event);
-                                clickedAny = true;
-                                break; // Only click the first visible one
+                                return btns[i];
                             }
                         }
                     }
                 }
-                return clickedAny;
+                return null;
             """)
-            time.sleep(2)
+            
+            if publish_btn:
+                try:
+                    # Use ActionChains for a trusted click (bypasses bot detection that checks isTrusted === false)
+                    actions = ActionChains(driver)
+                    actions.move_to_element(publish_btn).click().perform()
+                except Exception as e:
+                    print(f"ActionChains click failed: {e}. Trying JS click as fallback...")
+                    driver.execute_script("arguments[0].click();", publish_btn)
+                    
+            time.sleep(3)
             
             # Check if modal is open by looking for VISIBLE topics input or "Publish now" button
             modal_open = driver.execute_script("""
