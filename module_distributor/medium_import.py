@@ -181,7 +181,28 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
 
         print("Navigating to Medium import page...")
         driver.get("https://medium.com/p/import")
-        time.sleep(4)
+        time.sleep(5)
+        
+        # Verify the page has fully loaded (CSS/JS hydrated)
+        for load_check in range(10):
+            page_ready = driver.execute_script("""
+                // Check if page has proper styling (not a degraded/unstyled page)
+                var hasStylesheets = document.styleSheets.length > 2;
+                var hasImportBtn = !!Array.from(document.querySelectorAll('button')).find(
+                    b => (b.innerText || '').toLowerCase().includes('import')
+                );
+                var hasInput = !!document.querySelector('input');
+                return { ready: hasStylesheets && (hasImportBtn || hasInput), sheets: document.styleSheets.length, buttons: document.querySelectorAll('button').length };
+            """)
+            if page_ready.get('ready', False):
+                print(f"Import page loaded (stylesheets: {page_ready.get('sheets')}, buttons: {page_ready.get('buttons')}).")
+                break
+            print(f"Import page not fully loaded yet (attempt {load_check + 1}/10, sheets={page_ready.get('sheets')}, buttons={page_ready.get('buttons')}). Waiting...")
+            if load_check >= 4:
+                # Try a full page refresh after 5 failed attempts
+                print("Refreshing import page...")
+                driver.refresh()
+            time.sleep(3)
 
         # ── Step 3: Enter the canonical URL ───────────────────────────────
         print(f"Entering canonical URL: {canonical_url}")
@@ -199,11 +220,14 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                     var rect = inputs[i].getBoundingClientRect();
                     if (rect.width > 0 && rect.height > 0 && rect.top > 100) return inputs[i];
                 }
-                // Fallback to contenteditable divs
+                // Fallback to contenteditable divs (only if no input found)
                 var divs = document.querySelectorAll('div[contenteditable="true"]');
                 for (var i = 0; i < divs.length; i++) {
                     var rect = divs[i].getBoundingClientRect();
-                    if (rect.width > 0 && rect.height > 0 && rect.top > 100) return divs[i];
+                    if (rect.width > 0 && rect.height > 0 && rect.top > 100) {
+                        // Only accept div if the page appears fully loaded
+                        if (document.styleSheets.length > 2) return divs[i];
+                    }
                 }
                 return null;
             """)

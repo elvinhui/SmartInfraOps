@@ -240,6 +240,9 @@ def main():
             print(f"Article {url} successfully pushed to primary channels.")
             append_posted_url(url)
             success_count += 1
+            # Cooldown between articles to avoid Medium rate-limiting
+            print("Waiting 15 seconds before processing next article...")
+            time.sleep(15)
         else:
             print(f"Stopping execution due to failure on {url}.")
             sys.exit(1)
