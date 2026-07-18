@@ -375,16 +375,14 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             print("Replacing imported content with AI-polished version...")
 
             import re
-            import markdown
             polished_markdown = polished_markdown.strip()
             # Clean up excessive newlines before pasting to prevent huge vertical gaps
             polished_markdown = re.sub(r'\n{3,}', '\n\n', polished_markdown)
             
-            # Convert Markdown to HTML so Medium parses it correctly as rich text
-            polished_html = markdown.markdown(polished_markdown, extensions=['fenced_code'])
-            
-            # Put polished HTML into clipboard (WITHOUT title, since we type title manually)
-            _set_clipboard(polished_html, is_html=True)
+            # Paste as PLAIN TEXT — Medium's editor crashes when pasting complex HTML
+            # via clipboard (especially with code blocks). Plain text paste is much safer
+            # and Medium natively handles markdown-like formatting.
+            _set_clipboard(polished_markdown, is_html=False)
             time.sleep(0.5)
 
             # Focus first contenteditable (Medium editor)
@@ -425,7 +423,26 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             time.sleep(5)
             print("Polished content pasted.")
             driver.save_screenshot("module_distributor/debug_after_paste.png")
-
+            
+            # ── Health check: verify editor didn't crash after paste ──────
+            editor_alive = driver.execute_script("""
+                var btns = document.querySelectorAll('button');
+                return btns.length > 0;
+            """)
+            if not editor_alive:
+                print("WARNING: Editor appears to have crashed after paste. Attempting page refresh recovery...")
+                editor_url = driver.current_url
+                driver.refresh()
+                time.sleep(8)
+                # Re-check after refresh
+                editor_alive_2 = driver.execute_script("""
+                    var btns = document.querySelectorAll('button');
+                    return btns.length > 0;
+                """)
+                if not editor_alive_2:
+                    driver.save_screenshot("module_distributor/error_medium_editor_crash.png")
+                    raise Exception("Medium editor crashed after paste and could not recover.")
+                print("Editor recovered after page refresh.")
 
 
         # ── Step 7: Wait for Autosave & Publish ───────────────────────────────
