@@ -420,26 +420,36 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             actions = ActionChains(driver)
             actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
 
-            time.sleep(5)
+            time.sleep(10)
             print("Polished content pasted.")
             driver.save_screenshot("module_distributor/debug_after_paste.png")
             
             # ── Health check: verify editor didn't crash after paste ──────
-            editor_alive = driver.execute_script("""
-                var btns = document.querySelectorAll('button');
-                return btns.length > 0;
+            # Wait extra time for any delayed React crash to manifest
+            time.sleep(5)
+            page_info = driver.execute_script("""
+                return {
+                    url: window.location.href,
+                    title: document.title,
+                    bodyLen: document.body ? document.body.innerHTML.length : 0,
+                    buttonCount: document.querySelectorAll('button').length,
+                    hasEditor: !!document.querySelector('[contenteditable="true"]')
+                };
             """)
-            if not editor_alive:
+            print(f"Post-paste health: {json.dumps(page_info)}")
+            
+            if page_info.get('buttonCount', 0) == 0 or not page_info.get('hasEditor', False):
                 print("WARNING: Editor appears to have crashed after paste. Attempting page refresh recovery...")
-                editor_url = driver.current_url
                 driver.refresh()
-                time.sleep(8)
-                # Re-check after refresh
-                editor_alive_2 = driver.execute_script("""
-                    var btns = document.querySelectorAll('button');
-                    return btns.length > 0;
+                time.sleep(10)
+                page_info_2 = driver.execute_script("""
+                    return {
+                        buttonCount: document.querySelectorAll('button').length,
+                        hasEditor: !!document.querySelector('[contenteditable="true"]')
+                    };
                 """)
-                if not editor_alive_2:
+                print(f"Post-refresh health: {json.dumps(page_info_2)}")
+                if page_info_2.get('buttonCount', 0) == 0:
                     driver.save_screenshot("module_distributor/error_medium_editor_crash.png")
                     raise Exception("Medium editor crashed after paste and could not recover.")
                 print("Editor recovered after page refresh.")
@@ -449,37 +459,48 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
         # Wait for autosave to complete (Medium might be saving the imported draft)
         print("Waiting for Medium to autosave...")
         for save_attempt in range(60):
+            # Use both text matching AND CSS selector from real DOM inspection
             save_status = driver.execute_script("""
                 var isSaving = false;
+                var allText = document.body ? document.body.innerText.toLowerCase() : '';
+                if (allText.includes('saving')) isSaving = true;
+                
                 var spans = document.querySelectorAll('span');
                 for (var i = 0; i < spans.length; i++) {
-                    var txt = (spans[i].innerText || spans[i].textContent || '').toLowerCase().trim();
-                    if (txt.includes('saving...')) isSaving = true;
-                }
-                var btns = document.querySelectorAll('button');
-                for (var i = 0; i < btns.length; i++) {
-                    var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
-                    if (txt.includes('saving...')) isSaving = true;
+                    var txt = (spans[i].innerText || '').toLowerCase().trim();
+                    if (txt.includes('saving...') || txt === 'saving') isSaving = true;
                 }
                 if (isSaving) return 'saving';
                 
+                // Check by CSS selectors (from Medium's real DOM)
+                var pubBtn = document.querySelector('button[data-action="show-prepublish"], button.button--publish, .js-publishDialogButtonText');
+                if (pubBtn) return 'ready';
+                
+                // Fallback: check by text
+                var btns = document.querySelectorAll('button');
                 for (var i = 0; i < btns.length; i++) {
                     var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
-                    if ((txt === 'publish' || txt === 'publish and send') && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled')) {
+                    if ((txt === 'publish' || txt === 'publish and send') && !btns[i].disabled) {
                         return 'ready';
                     }
                 }
+                
+                // Check if page has crashed (zero buttons)
+                if (btns.length === 0) return 'crashed';
                 
                 return 'unknown';
             """)
             if save_status == 'ready':
                 print("Autosave complete. Publish button is ready.")
                 break
+            elif save_status == 'crashed':
+                print("WARNING: Page appears crashed during autosave wait. Refreshing...")
+                driver.refresh()
+                time.sleep(10)
             
             if save_attempt > 0 and save_attempt % 10 == 0:
                 print("Still saving... triggering a minor edit to force retry.")
                 try:
-                    # Type space and backspace at the end of the document
                     actions = ActionChains(driver)
                     actions.key_down(Keys.CONTROL).send_keys(Keys.END).key_up(Keys.CONTROL).perform()
                     time.sleep(0.5)
@@ -488,22 +509,51 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                     pass
             time.sleep(2)
 
+        # Extra stabilization wait before clicking publish
+        time.sleep(3)
+
         print("Waiting for Publish button and modal...")
         publish_clicked = False
         for attempt in range(20):
-            # Try to get the publish button element to perform a trusted click
+            # Diagnose page state on each attempt
+            page_state = driver.execute_script("""
+                return {
+                    buttonCount: document.querySelectorAll('button').length,
+                    url: window.location.href,
+                    hasEditor: !!document.querySelector('[contenteditable="true"]')
+                };
+            """)
+            
+            # If the page has crashed (0 buttons), try to recover
+            if page_state.get('buttonCount', 0) == 0:
+                print(f"Attempt {attempt + 1}: Page crashed (0 buttons). Refreshing...")
+                driver.refresh()
+                time.sleep(10)
+                continue
+            
+            # Try to find the publish button using Medium's actual CSS selectors
             publish_btn = driver.execute_script("""
+                // Method 1: CSS selector from real Medium DOM
+                var btn = document.querySelector('button[data-action="show-prepublish"]');
+                if (btn) {
+                    btn.scrollIntoView({behavior: 'instant', block: 'center'});
+                    return btn;
+                }
+                // Method 2: class-based selector
+                btn = document.querySelector('button.button--publish');
+                if (btn) {
+                    btn.scrollIntoView({behavior: 'instant', block: 'center'});
+                    return btn;
+                }
+                // Method 3: text-based fallback
                 var btns = document.querySelectorAll('button');
                 for (var i = 0; i < btns.length; i++) {
                     var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
-                    if (txt.includes('publish') && !txt.includes('publish now') && !btns[i].disabled && !btns[i].hasAttribute('aria-disabled')) {
+                    if (txt.includes('publish') && !txt.includes('publish now')) {
                         var rect = btns[i].getBoundingClientRect();
                         if (rect.width > 0 && rect.height > 0) {
-                            var style = window.getComputedStyle(btns[i]);
-                            if (style.visibility !== 'hidden' && style.opacity !== '0') {
-                                btns[i].scrollIntoView({behavior: 'instant', block: 'center'});
-                                return btns[i];
-                            }
+                            btns[i].scrollIntoView({behavior: 'instant', block: 'center'});
+                            return btns[i];
                         }
                     }
                 }
@@ -511,27 +561,34 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             """)
             
             if publish_btn:
+                print(f"Attempt {attempt + 1}: Publish button found. Clicking...")
                 try:
-                    # Use ActionChains for a trusted click (bypasses bot detection that checks isTrusted === false)
                     actions = ActionChains(driver)
                     actions.move_to_element(publish_btn).click().perform()
                 except Exception as e:
-                    print(f"ActionChains click failed: {e}. Trying JS click as fallback...")
+                    print(f"ActionChains click failed: {e}. Trying JS click...")
                     driver.execute_script("arguments[0].click();", publish_btn)
+            else:
+                print(f"Attempt {attempt + 1}: Publish button not found ({page_state.get('buttonCount', '?')} buttons on page).")
                     
             time.sleep(3)
             
-            # Check if modal is open by looking for VISIBLE topics input or "Publish now" button
+            # Check if modal is open
             modal_open = driver.execute_script("""
+                // Check for prepublish dialog/overlay
+                var dialog = document.querySelector('[role="dialog"], .overlay-content, .js-prepublishDialogContent');
+                if (dialog && dialog.getBoundingClientRect().width > 0) return true;
+                
                 var el = document.querySelector('input[placeholder="Add a topic..."], input[aria-controls="tagMultiSelectMenu"]');
-                var isElVisible = el && el.getBoundingClientRect().width > 0;
+                if (el && el.getBoundingClientRect().width > 0) return true;
                 
                 var btns = document.querySelectorAll('button');
-                var publishNow = Array.from(btns).some(b => (b.innerText || '').toLowerCase().trim().includes('publish now') && b.getBoundingClientRect().width > 0);
+                for (var i = 0; i < btns.length; i++) {
+                    var txt = (btns[i].innerText || '').toLowerCase().trim();
+                    if (txt.includes('publish now') && btns[i].getBoundingClientRect().width > 0) return true;
+                }
                 
-                var overlays = document.querySelectorAll('[role="dialog"], [class*="overlay"]');
-                var isOverlayVisible = Array.from(overlays).some(o => o.getBoundingClientRect().width > 0);
-                return isElVisible || publishNow || isOverlayVisible;
+                return false;
             """)
             
             if modal_open:
@@ -542,25 +599,33 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             print(f"Publish modal not open after attempt {attempt + 1}, retrying click...")
 
         if not publish_clicked:
-            # Dump info about buttons to debug why it failed
+            # Comprehensive debug dump
             debug_info = driver.execute_script("""
-                var info = [];
+                var info = {
+                    url: window.location.href,
+                    title: document.title,
+                    bodyLen: document.body ? document.body.innerHTML.length : 0,
+                    totalButtons: document.querySelectorAll('button').length,
+                    publishButtons: [],
+                    allButtonTexts: []
+                };
                 var btns = document.querySelectorAll('button');
-                for(var i=0; i<btns.length; i++) {
-                    var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
-                    if(txt.includes('publish')) {
-                        info.push({
+                for(var i=0; i<btns.length && i<30; i++) {
+                    var txt = (btns[i].innerText || btns[i].textContent || '').trim().substring(0, 50);
+                    info.allButtonTexts.push(txt);
+                    if(txt.toLowerCase().includes('publish')) {
+                        info.publishButtons.push({
                             text: txt,
                             disabled: btns[i].disabled,
-                            ariaDisabled: btns[i].getAttribute('aria-disabled'),
-                            rect: btns[i].getBoundingClientRect().toJSON(),
-                            style: window.getComputedStyle(btns[i]).visibility
+                            classes: btns[i].className.substring(0, 100),
+                            dataAction: btns[i].getAttribute('data-action'),
+                            rect: btns[i].getBoundingClientRect().toJSON()
                         });
                     }
                 }
                 return info;
             """)
-            print("DEBUG: Publish buttons found on screen: ", json.dumps(debug_info, indent=2))
+            print("DEBUG FULL PAGE STATE:", json.dumps(debug_info, indent=2))
             driver.save_screenshot("module_distributor/error_medium_no_publish.png")
             raise Exception("Publish button not found or modal failed to open after waiting.")
 
