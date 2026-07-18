@@ -191,8 +191,8 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                 var hasImportBtn = !!Array.from(document.querySelectorAll('button')).find(
                     b => (b.innerText || '').toLowerCase().includes('import')
                 );
-                var hasInput = !!document.querySelector('input');
-                return { ready: hasStylesheets && (hasImportBtn || hasInput), sheets: document.styleSheets.length, buttons: document.querySelectorAll('button').length };
+                var hasInput = !!document.querySelector('input:not([type="hidden"])');
+                return { ready: hasStylesheets && hasImportBtn && hasInput, sheets: document.styleSheets.length, buttons: document.querySelectorAll('button').length };
             """)
             if page_ready.get('ready', False):
                 print(f"Import page loaded (stylesheets: {page_ready.get('sheets')}, buttons: {page_ready.get('buttons')}).")
@@ -215,10 +215,10 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                 if (exact) return exact;
                 
                 // Prefer <input> elements first (more reliable for typing)
-                var inputs = document.querySelectorAll('input[type="text"], input:not([type])');
+                var inputs = document.querySelectorAll('input:not([type="hidden"])');
                 for (var i = 0; i < inputs.length; i++) {
                     var rect = inputs[i].getBoundingClientRect();
-                    if (rect.width > 0 && rect.height > 0 && rect.top > 100) return inputs[i];
+                    if (rect.width > 0 && rect.height > 0 && rect.top > 50) return inputs[i];
                 }
                 // Fallback to contenteditable divs (only if no input found)
                 var divs = document.querySelectorAll('div[contenteditable="true"]');
