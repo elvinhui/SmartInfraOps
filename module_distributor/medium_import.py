@@ -206,8 +206,13 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             """)
             if input_elem:
                 try:
-                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'}); arguments[0].focus(); arguments[0].click();", input_elem)
+                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", input_elem)
                     time.sleep(1)
+                    try:
+                        ActionChains(driver).move_to_element(input_elem).click().perform()
+                    except:
+                        driver.execute_script("arguments[0].focus(); arguments[0].click();", input_elem)
+                    time.sleep(0.5)
                     
                     try:
                         # .clear() throws InvalidElementStateException on contenteditable divs
@@ -251,7 +256,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
 
         # ── Step 4: Click the Import button ───────────────────────────────
         print("Clicking Import button...")
-        clicked = driver.execute_script("""
+        import_btn = driver.execute_script("""
             var btns = document.querySelectorAll('button');
             for (var i = 0; i < btns.length; i++) {
                 var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
@@ -259,13 +264,21 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                     if (btns[i].disabled || btns[i].hasAttribute('aria-disabled') && btns[i].getAttribute('aria-disabled') === 'true') {
                         continue;
                     }
-                    btns[i].click();
-                    return true;
+                    btns[i].scrollIntoView({behavior: 'instant', block: 'center'});
+                    return btns[i];
                 }
             }
-            return false;
+            return null;
         """)
-        if not clicked:
+        
+        if import_btn:
+            try:
+                actions = ActionChains(driver)
+                actions.move_to_element(import_btn).click().perform()
+            except Exception as e:
+                print(f"ActionChains click on Import failed: {e}. Trying JS fallback...")
+                driver.execute_script("arguments[0].click();", import_btn)
+        else:
             driver.save_screenshot("module_distributor/error_medium_no_import_btn.png")
             raise Exception("Failed to find or click enabled Import button. React state might not have updated.")
 
