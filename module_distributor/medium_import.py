@@ -673,10 +673,20 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                 time.sleep(1)
 
                 topic_input = driver.execute_script("""
-                    var el = document.querySelector('input[role="combobox"][aria-controls="tagMultiSelectMenu"]');
+                    // Medium's explicit ID for the topics input on the Story Preview page
+                    var el = document.getElementById('tags');
                     if (el) return el;
+
+                    el = document.querySelector('input[role="combobox"][aria-controls="tagMultiSelectMenu"]');
+                    if (el) return el;
+                    
                     el = document.querySelector('input[placeholder="Add a topic..."]');
                     if (el) return el;
+                    
+                    // Specific class check based on DOM observation
+                    el = document.querySelector('input.gg.fa.gh.gi.gj.gk.fb.gl.cn.b.dj.dk.cs');
+                    if (el) return el;
+
                     var inputs = document.querySelectorAll('input');
                     for (var i = 0; i < inputs.length; i++) {
                         var ph = (inputs[i].placeholder || '').toLowerCase();
