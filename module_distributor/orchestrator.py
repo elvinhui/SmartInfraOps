@@ -9,6 +9,7 @@ from medium_import import push_to_medium, FatalError
 from twitter_playwright import post_tweet
 from linkedin_api import post_linkedin
 from deepseek_polish import polish_article
+from generate_cover_image import generate_cover_image
 
 RSS_URL = os.getenv("RSS_URL", "https://smartinfralog.com/index.xml")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
@@ -203,10 +204,14 @@ def main():
         text_excerpt = fetch_article_text(url)
         html_content = fetch_article_html(url)
 
-        # 2. Polish article with DeepSeek (returns Markdown)
+        # 2. Polish article with DeepSeek (returns HTML)
         print("Polishing article with DeepSeek...")
         polished_markdown = polish_article(html_content)
         # Empty string = DeepSeek skipped/failed; Medium keeps raw imported content
+
+        # 2.5. Generate cover image with Gemini
+        print("Generating cover image with Gemini...")
+        cover_image_path = generate_cover_image(title, categories)
 
         # 3. Generate social copy with Gemini/DeepSeek
         print("Generating AI Social Variants and Medium Topics...")
@@ -231,7 +236,7 @@ def main():
         # 6. Push to Medium via undetected_chromedriver Import + paste
         print("Pushing to Medium (Import + AI paste)...")
         try:
-            med_success = push_to_medium(url, title, polished_markdown, topics=medium_topics)
+            med_success = push_to_medium(url, title, polished_markdown, topics=medium_topics, cover_image_path=cover_image_path)
         except FatalError as e:
             print(f"FATAL ERROR: {e}")
             sys.exit(1)

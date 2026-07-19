@@ -109,13 +109,16 @@ def _build_driver() -> uc.Chrome:
 # Main entry point
 # ──────────────────────────────────────────────────────────────────────────────
 
-def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", topics: list = None) -> bool:
+def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", topics: list = None, cover_image_path: str = "") -> bool:
     """
     Imports an article into Medium via the Import feature, which automatically
     sets the canonical link back to `canonical_url`.
 
     If `polished_markdown` is supplied, the imported content is replaced with
     the AI-polished version via clipboard paste.
+
+    If `cover_image_path` is supplied, the image is uploaded as the article's
+    cover/hero image in the Medium editor.
 
     Returns True on success, False on recoverable error.
     Raises FatalError for unrecoverable problems.
@@ -492,6 +495,103 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             actions.send_keys(Keys.RETURN)
             actions.perform()
             time.sleep(1)
+
+            # ── Step 6b: Upload cover image (if provided) ─────────────────────
+            if cover_image_path and os.path.isfile(cover_image_path):
+                print(f"Uploading cover image: {cover_image_path}")
+                try:
+                    # Medium's editor supports image upload via a hidden file input.
+                    # We inject one into the DOM, point it at our file, and trigger
+                    # the change event to let Medium's JS handle the upload.
+                    
+                    # First, try to find an existing image upload input
+                    file_input = driver.execute_script("""
+                        // Look for existing file input (Medium may already have one)
+                        var existing = document.querySelector('input[type="file"][accept*="image"]');
+                        if (existing) return existing;
+                        
+                        // Create a new file input and attach it to the editor area
+                        var input = document.createElement('input');
+                        input.type = 'file';
+                        input.accept = 'image/*';
+                        input.style.position = 'fixed';
+                        input.style.top = '-9999px';
+                        input.id = '__cover_img_upload';
+                        document.body.appendChild(input);
+                        return input;
+                    """)
+                    
+                    if file_input:
+                        # Use Selenium's send_keys to set the file path on the input
+                        abs_path = os.path.abspath(cover_image_path)
+                        file_input.send_keys(abs_path)
+                        time.sleep(5)  # Wait for Medium to process the upload
+                        
+                        # Check if the image appeared in the editor
+                        img_uploaded = driver.execute_script("""
+                            var imgs = document.querySelectorAll('[contenteditable="true"] img, figure img');
+                            return imgs.length > 0;
+                        """)
+                        
+                        if img_uploaded:
+                            print("Cover image uploaded successfully to Medium editor.")
+                        else:
+                            # Fallback: try Medium's "+" button approach
+                            print("File input didn't trigger image display. Trying toolbar approach...")
+                            
+                            # Click at the beginning of the body (after title) to position cursor
+                            ActionChains(driver).send_keys(Keys.HOME).perform()
+                            time.sleep(0.5)
+                            
+                            # Look for the "+" add content button in Medium's editor
+                            add_btn = driver.execute_script("""
+                                // Medium's "+" button appears when cursor is on an empty line
+                                var addBtns = document.querySelectorAll('button[data-action="inline-menu-input"], button[title="Add an image"], .js-inlineImageButton');
+                                for (var i = 0; i < addBtns.length; i++) {
+                                    if (addBtns[i].offsetParent !== null) {
+                                        addBtns[i].click();
+                                        return true;
+                                    }
+                                }
+                                // Try the floating "+" menu
+                                var plusBtns = document.querySelectorAll('[data-action="toggle-inline-menu"]');
+                                for (var i = 0; i < plusBtns.length; i++) {
+                                    if (plusBtns[i].offsetParent !== null) {
+                                        plusBtns[i].click();
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            """)
+                            
+                            if add_btn:
+                                time.sleep(1)
+                                # Now find the image upload option and its file input
+                                img_input = driver.execute_script("""
+                                    var inputs = document.querySelectorAll('input[type="file"][accept*="image"]');
+                                    for (var i = 0; i < inputs.length; i++) {
+                                        return inputs[i];
+                                    }
+                                    return null;
+                                """)
+                                if img_input:
+                                    img_input.send_keys(abs_path)
+                                    time.sleep(5)
+                                    print("Cover image uploaded via toolbar approach.")
+                                else:
+                                    print("Warning: Could not find image file input after toolbar click.")
+                            else:
+                                print("Warning: Could not find add content button for image upload.")
+                        
+                        driver.save_screenshot("module_distributor/debug_after_cover_image.png")
+                    else:
+                        print("Warning: Could not create file input element for image upload.")
+                        
+                except Exception as img_err:
+                    print(f"Warning: Cover image upload failed: {img_err}")
+                    # Non-fatal — continue without cover image
+            elif cover_image_path:
+                print(f"Warning: Cover image path not found: {cover_image_path}")
             
             print("Pasting body via ActionChains...")
             actions = ActionChains(driver)
