@@ -48,7 +48,7 @@ def generate_cover_image(title: str, categories: list = None) -> str:
 
         # Use generate_content with image generation model
         response = client.models.generate_content(
-            model="gemini-2.0-flash-exp",
+            model="gemini-3.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE", "TEXT"],
