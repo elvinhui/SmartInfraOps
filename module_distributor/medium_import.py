@@ -57,16 +57,15 @@ def _load_cookies() -> list:
         return []
 
 
-def _set_clipboard(text: str, is_html: bool = False):
+def _set_clipboard(text: str, mime_type: str = "text/html"):
     """
     Cross-platform clipboard write.
     On Linux uses xclip/xsel; falls back to a temp file approach.
+    mime_type: 'text/html' for rich paste into Medium, 'text/plain' for plain text.
     """
     try:
         # Try xclip (available after apt-get install xclip)
-        cmd = ["xclip", "-selection", "clipboard"]
-        if is_html:
-            cmd.extend(["-t", "text/html"])
+        cmd = ["xclip", "-selection", "clipboard", "-t", mime_type]
         proc = subprocess.run(
             cmd,
             input=text.encode("utf-8"),
@@ -458,10 +457,9 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             # Clean up excessive newlines before pasting to prevent huge vertical gaps
             polished_markdown = re.sub(r'\n{3,}', '\n\n', polished_markdown)
             
-            # Paste as PLAIN TEXT — Medium's editor crashes when pasting complex HTML
-            # via clipboard (especially with code blocks). Plain text paste is much safer
-            # and Medium natively handles markdown-like formatting.
-            _set_clipboard(polished_markdown, is_html=False)
+            # Paste as HTML so Medium's editor renders formatting (bold, lists, headings, code)
+            # DeepSeek now outputs clean HTML instead of Markdown.
+            _set_clipboard(polished_markdown, mime_type="text/html")
             time.sleep(0.5)
 
             # Focus first contenteditable (Medium editor)
