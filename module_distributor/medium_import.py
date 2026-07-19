@@ -177,222 +177,277 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
         except Exception as e:
             print(f"Warning: Failed to check existing stories: {e}")
 
-        # ── Step 2: Navigate to Medium Import page ─────────────────────────
+        # ── Steps 2-5: Import flow with retry ──────────────────────────────
+        # Wrap the import sequence in a retry loop to handle Medium rate-limiting
+        # and degraded/unstyled page loads.
+        MAX_IMPORT_RETRIES = 3
+        import_succeeded = False
 
-        print("Navigating to Medium import page...")
-        driver.get("https://medium.com/p/import")
-        time.sleep(5)
-        
-        # Verify the page has fully loaded (CSS/JS hydrated)
-        for load_check in range(10):
-            page_ready = driver.execute_script("""
-                // Check if page has proper styling (not a degraded/unstyled page)
-                var hasStylesheets = document.styleSheets.length >= 2;
-                var hasImportBtn = !!Array.from(document.querySelectorAll('button')).find(
-                    b => (b.innerText || '').toLowerCase().includes('import')
-                );
-                var hasInput = !!document.querySelector('input:not([type="hidden"])');
-                return { ready: hasStylesheets && hasImportBtn && hasInput, sheets: document.styleSheets.length, buttons: document.querySelectorAll('button').length };
-            """)
-            if page_ready.get('ready', False):
-                print(f"Import page loaded (stylesheets: {page_ready.get('sheets')}, buttons: {page_ready.get('buttons')}).")
-                break
-            print(f"Import page not fully loaded yet (attempt {load_check + 1}/10, sheets={page_ready.get('sheets')}, buttons={page_ready.get('buttons')}). Waiting...")
-            if load_check >= 4:
-                # Try a full page refresh after 5 failed attempts
-                print("Refreshing import page...")
-                driver.refresh()
-            time.sleep(3)
+        for import_retry in range(MAX_IMPORT_RETRIES):
+            if import_retry > 0:
+                retry_wait = 30 * import_retry  # 30s, 60s backoff
+                print(f"\n--- Import retry {import_retry + 1}/{MAX_IMPORT_RETRIES} (waiting {retry_wait}s before retry) ---")
+                time.sleep(retry_wait)
 
-        # ── Step 3: Enter the canonical URL ───────────────────────────────
-        print(f"Entering canonical URL: {canonical_url}")
-        
-        found_input = False
-        for retry in range(15):
-            input_elem = driver.execute_script("""
-                // Exact target based on Medium DOM
-                var exact = document.querySelector('.js-importUrl, [data-default-value*="yoursite"]');
-                if (exact) return exact;
-                
-                // Prefer <input> elements first (more reliable for typing)
-                var inputs = document.querySelectorAll('input:not([type="hidden"])');
-                for (var i = 0; i < inputs.length; i++) {
-                    var rect = inputs[i].getBoundingClientRect();
-                    if (rect.width > 0 && rect.height > 0 && rect.top > 50) return inputs[i];
-                }
-                // Fallback to contenteditable divs (only if no input found)
-                var divs = document.querySelectorAll('div[contenteditable="true"]');
-                for (var i = 0; i < divs.length; i++) {
-                    var rect = divs[i].getBoundingClientRect();
-                    if (rect.width > 0 && rect.height > 0 && rect.top > 100) {
-                        // Only accept div if the page appears fully loaded
-                        if (document.styleSheets.length >= 2) return divs[i];
-                    }
-                }
-                return null;
-            """)
-            if input_elem:
-                tag = input_elem.tag_name.lower()
-                print(f"Found URL input element: <{tag}>")
-                try:
-                    # Scroll into view
-                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", input_elem)
-                    time.sleep(0.5)
-                    
-                    url_entered = False
-                    
-                    # Method 1: ActionChains focus + ActionChains typing (most reliable for trusted input)
-                    try:
-                        ActionChains(driver).move_to_element(input_elem).click().perform()
-                        time.sleep(0.3)
-                        # Select all existing text and delete it
-                        ActionChains(driver).key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
-                        time.sleep(0.2)
-                        ActionChains(driver).send_keys(Keys.DELETE).perform()
-                        time.sleep(0.2)
-                        # Type the URL character by character via ActionChains (sends to focused element)
-                        for char in canonical_url:
-                            ActionChains(driver).send_keys(char).perform()
-                            time.sleep(random.uniform(0.03, 0.08))
-                        url_entered = True
-                        print("URL entered via ActionChains typing.")
-                    except Exception as e1:
-                        print(f"ActionChains typing failed: {e1}")
-                    
-                    # Method 2: element.send_keys (standard Selenium)
-                    if not url_entered:
-                        try:
-                            if tag == 'input':
-                                input_elem.clear()
-                            human_typing(input_elem, canonical_url)
-                            url_entered = True
-                            print("URL entered via element.send_keys.")
-                        except Exception as e2:
-                            print(f"element.send_keys failed: {e2}")
-                    
-                    # Method 3: JS injection with React-aware value setter
-                    if not url_entered:
-                        print("Falling back to JS injection...")
-                        driver.execute_script("""
-                            var el = arguments[0], url = arguments[1];
-                            if (el.tagName.toLowerCase() === 'div') {
-                                el.textContent = url;
-                                el.dispatchEvent(new Event('input', { bubbles: true }));
-                            } else {
-                                var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-                                if (setter) setter.call(el, url);
-                                else el.value = url;
-                                el.dispatchEvent(new Event('input', { bubbles: true }));
-                                el.dispatchEvent(new Event('change', { bubbles: true }));
-                                // Also fire React's synthetic event via a keyboard event
-                                el.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
-                                el.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', bubbles: true }));
-                            }
-                        """, input_elem, canonical_url)
-                        url_entered = True
-                        print("URL entered via JS injection.")
-                    
-                    found_input = True
-                    break
-                except Exception as e:
-                    print(f"Error interacting with input: {e}")
-            time.sleep(2)
-
-        if not found_input:
-            driver.save_screenshot("module_distributor/error_medium_no_input.png")
-            raise Exception("Failed to find URL input field on Medium import page.")
-
-        time.sleep(2)
-
-        # ── Step 4: Click the Import button ───────────────────────────────
-        # Wait for Import button to become truly enabled (React may need a moment)
-        print("Clicking Import button...")
-        import_clicked = False
-        for import_attempt in range(10):
-            import_btn = driver.execute_script("""
-                var btns = document.querySelectorAll('button');
-                for (var i = 0; i < btns.length; i++) {
-                    var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
-                    if (txt.includes('import')) {
-                        btns[i].scrollIntoView({behavior: 'instant', block: 'center'});
-                        return btns[i];
-                    }
-                }
-                return null;
-            """)
-            
-            if import_btn:
-                # Check if the button is truly enabled
-                is_disabled = driver.execute_script("""
-                    var btn = arguments[0];
-                    if (btn.disabled) return true;
-                    if (btn.getAttribute('aria-disabled') === 'true') return true;
-                    var style = window.getComputedStyle(btn);
-                    if (style.pointerEvents === 'none') return true;
-                    if (parseFloat(style.opacity) < 0.5) return true;
-                    return false;
-                """, import_btn)
-                
-                if is_disabled:
-                    print(f"Import button found but disabled (attempt {import_attempt + 1}/10). Waiting...")
-                    time.sleep(2)
-                    continue
-                
-                try:
-                    actions = ActionChains(driver)
-                    actions.move_to_element(import_btn).click().perform()
-                    import_clicked = True
-                    print("Import button clicked via ActionChains.")
-                    break
-                except Exception as e:
-                    print(f"ActionChains click on Import failed: {e}. Trying JS fallback...")
-                    driver.execute_script("arguments[0].click();", import_btn)
-                    import_clicked = True
-                    break
-            else:
-                print(f"Import button not found (attempt {import_attempt + 1}/10). Waiting...")
-                time.sleep(2)
-        
-        if not import_clicked:
-            driver.save_screenshot("module_distributor/error_medium_no_import_btn.png")
-            raise Exception("Failed to find or click enabled Import button. React state might not have updated.")
-
-        # ── Step 5: Wait for "See your story" / redirect to editor ────────
-        print("Waiting for import to complete...")
-        see_story_clicked = False
-        for _ in range(20):
-            time.sleep(2)
-            clicked = driver.execute_script("""
-                var els = document.querySelectorAll('button, a');
-                for (var i = 0; i < els.length; i++) {
-                    var txt = (els[i].innerText || els[i].textContent || '').toLowerCase().trim();
-                    if (txt.includes('see your story') || txt.includes('edit your story')) {
-                        els[i].click();
-                        return true;
-                    }
-                }
-                return false;
-            """)
-            if clicked:
-                see_story_clicked = True
-                print("Clicked 'See your story'.")
+            try:
+                # ── Step 2: Navigate to Medium Import page ─────────────────────────
+                print("Navigating to Medium import page...")
+                driver.get("https://medium.com/p/import")
                 time.sleep(5)
-                break
-            # Medium might auto-redirect to the editor now
-            if "/edit" in driver.current_url or ("/p/" in driver.current_url and "import" not in driver.current_url):
-                print("Auto-redirected to editor.")
-                see_story_clicked = True
+
+                # Verify the page has fully loaded (CSS/JS hydrated)
+                page_is_ready = False
+                for load_check in range(12):
+                    page_ready = driver.execute_script("""
+                        // Check if page has proper styling (not a degraded/unstyled page)
+                        var hasStylesheets = document.styleSheets.length >= 2;
+                        var importBtn = Array.from(document.querySelectorAll('button')).find(
+                            b => (b.innerText || '').toLowerCase().includes('import')
+                        );
+                        var hasImportBtn = !!importBtn;
+                        var hasInput = !!document.querySelector('input:not([type="hidden"])');
+
+                        // Critical: check that the page is actually styled/rendered, not degraded
+                        // A degraded page may have stylesheets loaded but no actual CSS applied
+                        var bodyLen = document.body ? document.body.innerHTML.length : 0;
+                        var hasNav = !!document.querySelector('nav, header, [role="banner"]');
+                        var computedBg = window.getComputedStyle(document.body).backgroundColor;
+                        var isStyled = bodyLen > 2000 || hasNav || (computedBg && computedBg !== 'rgba(0, 0, 0, 0)');
+
+                        // Check import button is actually rendered with proper dimensions
+                        var btnRendered = false;
+                        if (importBtn) {
+                            var rect = importBtn.getBoundingClientRect();
+                            btnRendered = rect.width > 40 && rect.height > 20;
+                        }
+
+                        return {
+                            ready: hasStylesheets && hasImportBtn && hasInput && isStyled && btnRendered,
+                            sheets: document.styleSheets.length,
+                            buttons: document.querySelectorAll('button').length,
+                            bodyLen: bodyLen,
+                            isStyled: isStyled,
+                            btnRendered: btnRendered
+                        };
+                    """)
+                    if page_ready.get('ready', False):
+                        print(f"Import page loaded (stylesheets: {page_ready.get('sheets')}, buttons: {page_ready.get('buttons')}, bodyLen: {page_ready.get('bodyLen')}).")
+                        page_is_ready = True
+                        break
+                    print(f"Import page not fully loaded yet (attempt {load_check + 1}/12, sheets={page_ready.get('sheets')}, buttons={page_ready.get('buttons')}, bodyLen={page_ready.get('bodyLen')}, styled={page_ready.get('isStyled')}, btnRendered={page_ready.get('btnRendered')}). Waiting...")
+                    if load_check >= 4:
+                        # Try a full page refresh after 5 failed attempts
+                        print("Refreshing import page...")
+                        driver.refresh()
+                    time.sleep(3)
+
+                if not page_is_ready:
+                    driver.save_screenshot(f"module_distributor/error_medium_page_degraded_attempt{import_retry + 1}.png")
+                    raise Exception(f"Import page failed to fully render after 12 checks (likely rate-limited). bodyLen={page_ready.get('bodyLen')}, styled={page_ready.get('isStyled')}")
+
+                # ── Step 3: Enter the canonical URL ───────────────────────────────
+                print(f"Entering canonical URL: {canonical_url}")
+
+                found_input = False
+                for retry in range(15):
+                    input_elem = driver.execute_script("""
+                        // Exact target based on Medium DOM
+                        var exact = document.querySelector('.js-importUrl, [data-default-value*="yoursite"]');
+                        if (exact) return exact;
+
+                        // Prefer <input> elements first (more reliable for typing)
+                        var inputs = document.querySelectorAll('input:not([type="hidden"])');
+                        for (var i = 0; i < inputs.length; i++) {
+                            var rect = inputs[i].getBoundingClientRect();
+                            if (rect.width > 0 && rect.height > 0 && rect.top > 50) return inputs[i];
+                        }
+                        // Fallback to contenteditable divs (only if no input found)
+                        var divs = document.querySelectorAll('div[contenteditable="true"]');
+                        for (var i = 0; i < divs.length; i++) {
+                            var rect = divs[i].getBoundingClientRect();
+                            if (rect.width > 0 && rect.height > 0 && rect.top > 100) {
+                                // Only accept div if the page appears fully loaded
+                                if (document.styleSheets.length >= 2) return divs[i];
+                            }
+                        }
+                        return null;
+                    """)
+                    if input_elem:
+                        tag = input_elem.tag_name.lower()
+                        print(f"Found URL input element: <{tag}>")
+                        try:
+                            # Scroll into view
+                            driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", input_elem)
+                            time.sleep(0.5)
+
+                            url_entered = False
+
+                            # Method 1: ActionChains focus + ActionChains typing (most reliable for trusted input)
+                            try:
+                                ActionChains(driver).move_to_element(input_elem).click().perform()
+                                time.sleep(0.3)
+                                # Select all existing text and delete it
+                                ActionChains(driver).key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
+                                time.sleep(0.2)
+                                ActionChains(driver).send_keys(Keys.DELETE).perform()
+                                time.sleep(0.2)
+                                # Type the URL character by character via ActionChains (sends to focused element)
+                                for char in canonical_url:
+                                    ActionChains(driver).send_keys(char).perform()
+                                    time.sleep(random.uniform(0.03, 0.08))
+                                url_entered = True
+                                print("URL entered via ActionChains typing.")
+                            except Exception as e1:
+                                print(f"ActionChains typing failed: {e1}")
+
+                            # Method 2: element.send_keys (standard Selenium)
+                            if not url_entered:
+                                try:
+                                    if tag == 'input':
+                                        input_elem.clear()
+                                    human_typing(input_elem, canonical_url)
+                                    url_entered = True
+                                    print("URL entered via element.send_keys.")
+                                except Exception as e2:
+                                    print(f"element.send_keys failed: {e2}")
+
+                            # Method 3: JS injection with React-aware value setter
+                            if not url_entered:
+                                print("Falling back to JS injection...")
+                                driver.execute_script("""
+                                    var el = arguments[0], url = arguments[1];
+                                    if (el.tagName.toLowerCase() === 'div') {
+                                        el.textContent = url;
+                                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                                    } else {
+                                        var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                                        if (setter) setter.call(el, url);
+                                        else el.value = url;
+                                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                                        // Also fire React's synthetic event via a keyboard event
+                                        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+                                        el.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', bubbles: true }));
+                                    }
+                                """, input_elem, canonical_url)
+                                url_entered = True
+                                print("URL entered via JS injection.")
+
+                            found_input = True
+                            break
+                        except Exception as e:
+                            print(f"Error interacting with input: {e}")
+                    time.sleep(2)
+
+                if not found_input:
+                    driver.save_screenshot("module_distributor/error_medium_no_input.png")
+                    raise Exception("Failed to find URL input field on Medium import page.")
+
+                time.sleep(2)
+
+                # ── Step 4: Click the Import button ───────────────────────────────
+                # Wait for Import button to become truly enabled (React may need a moment)
+                print("Clicking Import button...")
+                import_clicked = False
+                for import_attempt in range(10):
+                    import_btn = driver.execute_script("""
+                        var btns = document.querySelectorAll('button');
+                        for (var i = 0; i < btns.length; i++) {
+                            var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
+                            if (txt.includes('import')) {
+                                btns[i].scrollIntoView({behavior: 'instant', block: 'center'});
+                                return btns[i];
+                            }
+                        }
+                        return null;
+                    """)
+
+                    if import_btn:
+                        # Check if the button is truly enabled
+                        is_disabled = driver.execute_script("""
+                            var btn = arguments[0];
+                            if (btn.disabled) return true;
+                            if (btn.getAttribute('aria-disabled') === 'true') return true;
+                            var style = window.getComputedStyle(btn);
+                            if (style.pointerEvents === 'none') return true;
+                            if (parseFloat(style.opacity) < 0.5) return true;
+                            return false;
+                        """, import_btn)
+
+                        if is_disabled:
+                            print(f"Import button found but disabled (attempt {import_attempt + 1}/10). Waiting...")
+                            time.sleep(2)
+                            continue
+
+                        try:
+                            actions = ActionChains(driver)
+                            actions.move_to_element(import_btn).click().perform()
+                            import_clicked = True
+                            print("Import button clicked via ActionChains.")
+                            break
+                        except Exception as e:
+                            print(f"ActionChains click on Import failed: {e}. Trying JS fallback...")
+                            driver.execute_script("arguments[0].click();", import_btn)
+                            import_clicked = True
+                            break
+                    else:
+                        print(f"Import button not found (attempt {import_attempt + 1}/10). Waiting...")
+                        time.sleep(2)
+
+                if not import_clicked:
+                    driver.save_screenshot("module_distributor/error_medium_no_import_btn.png")
+                    raise Exception("Failed to find or click enabled Import button. React state might not have updated.")
+
+                # ── Step 5: Wait for "See your story" / redirect to editor ────────
+                print("Waiting for import to complete...")
+                see_story_clicked = False
+                for _ in range(25):
+                    time.sleep(2)
+                    clicked = driver.execute_script("""
+                        var els = document.querySelectorAll('button, a');
+                        for (var i = 0; i < els.length; i++) {
+                            var txt = (els[i].innerText || els[i].textContent || '').toLowerCase().trim();
+                            if (txt.includes('see your story') || txt.includes('edit your story')) {
+                                els[i].click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    """)
+                    if clicked:
+                        see_story_clicked = True
+                        print("Clicked 'See your story'.")
+                        time.sleep(5)
+                        break
+                    # Medium might auto-redirect to the editor now
+                    if "/edit" in driver.current_url or ("/p/" in driver.current_url and "import" not in driver.current_url):
+                        print("Auto-redirected to editor.")
+                        see_story_clicked = True
+                        break
+
+                if not see_story_clicked:
+                    driver.save_screenshot(f"module_distributor/error_medium_no_see_story_attempt{import_retry + 1}.png")
+                    raise Exception(f"Did not transition to editor. Current URL: {driver.current_url}")
+
+                # Wait for editor to fully load
+                time.sleep(8)
+                print(f"Current URL after import: {driver.current_url}")
+                if "/edit" not in driver.current_url and "/p/" not in driver.current_url:
+                    raise Exception("URL does not look like the Medium editor.")
+
+                # Import succeeded — break out of retry loop
+                import_succeeded = True
                 break
 
-        if not see_story_clicked:
-            driver.save_screenshot("module_distributor/error_medium_no_see_story.png")
-            raise Exception(f"Did not transition to editor. Current URL: {driver.current_url}")
+            except Exception as import_err:
+                print(f"Import attempt {import_retry + 1}/{MAX_IMPORT_RETRIES} failed: {import_err}")
+                if import_retry < MAX_IMPORT_RETRIES - 1:
+                    print("Will retry the import flow...")
+                else:
+                    raise Exception(f"All {MAX_IMPORT_RETRIES} import attempts failed. Last error: {import_err}")
 
-        # Wait for editor to fully load
-        time.sleep(8)
-        print(f"Current URL after import: {driver.current_url}")
-        if "/edit" not in driver.current_url and "/p/" not in driver.current_url:
-            raise Exception("URL does not look like the Medium editor.")
+        if not import_succeeded:
+            raise Exception("Import flow did not succeed after all retries.")
 
         # ── Step 6: Paste AI-polished content (if provided) ───────────────
         if polished_markdown:
