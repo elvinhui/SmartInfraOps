@@ -454,14 +454,20 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             print("Replacing imported content with AI-polished version...")
 
             import re
+            import markdown
             polished_markdown = polished_markdown.strip()
             # Clean up excessive newlines before pasting to prevent huge vertical gaps
             polished_markdown = re.sub(r'\n{3,}', '\n\n', polished_markdown)
             
-            # Paste as PLAIN TEXT — Medium's editor crashes when pasting complex HTML
-            # via clipboard (especially with code blocks). Plain text paste is much safer
-            # and Medium natively handles markdown-like formatting.
-            _set_clipboard(polished_markdown, is_html=False)
+            # Convert Markdown to HTML so Medium parses it correctly as rich text
+            polished_html = markdown.markdown(polished_markdown, extensions=['fenced_code'])
+            
+            # Medium's editor is known to crash when pasting complex HTML (especially nested <pre><code>).
+            # However, omitting <code> completely makes code blocks invisible.
+            # We strip out attributes (like class) from <code> inside <pre> to make it safe.
+            polished_html = re.sub(r'<pre><code[^>]*>', '<pre><code>', polished_html)
+            
+            _set_clipboard(polished_html, is_html=True)
             time.sleep(0.5)
 
             # Focus first contenteditable (Medium editor)

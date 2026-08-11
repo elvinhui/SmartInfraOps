@@ -89,6 +89,27 @@ def fetch_article_html(url):
         print(f"Warning: Failed to fetch HTML from {url}: {e}")
         return ""
 
+def fetch_article_cover(url):
+    """Fetch the og:image for the article to use as a cover image."""
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response:
+            html = response.read().decode('utf-8')
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+        meta = soup.find('meta', property='og:image')
+        if meta and meta.get('content'):
+            img_url = meta['content']
+            if img_url.startswith('/'):
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                base = f"{parsed.scheme}://{parsed.netloc}"
+                img_url = base + img_url
+            return img_url
+    except Exception as e:
+        print(f"Warning: Failed to fetch cover image from {url}: {e}")
+    return ""
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Social variant generation (Gemini)
@@ -202,11 +223,15 @@ def main():
         # 1. Fetch content
         text_excerpt = fetch_article_text(url)
         html_content = fetch_article_html(url)
+        cover_image_url = fetch_article_cover(url)
 
         # 2. Polish article with DeepSeek (returns Markdown)
         print("Polishing article with DeepSeek...")
         polished_markdown = polish_article(html_content)
         # Empty string = DeepSeek skipped/failed; Medium keeps raw imported content
+        
+        if polished_markdown and cover_image_url:
+            polished_markdown = f"![Cover Image]({cover_image_url})\n\n" + polished_markdown
 
         # 3. Generate social copy with Gemini/DeepSeek
         print("Generating AI Social Variants and Medium Topics...")
