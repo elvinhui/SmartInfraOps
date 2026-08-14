@@ -92,6 +92,24 @@ def _set_clipboard(text: str, is_html: bool = False):
         print(f"Warning: All clipboard methods failed: {e}")
 
 
+def _detect_chrome_version() -> int:
+    """Auto-detect the installed Chrome/Chromium major version."""
+    for binary in ("google-chrome", "google-chrome-stable", "chromium-browser", "chromium"):
+        try:
+            out = subprocess.check_output([binary, "--version"], stderr=subprocess.DEVNULL)
+            # Output looks like "Google Chrome 151.0.7922.108" or "Chromium 151.0.7922.108"
+            import re as _re
+            match = _re.search(r"(\d+)\.", out.decode())
+            if match:
+                ver = int(match.group(1))
+                print(f"Detected Chrome version: {ver} (from {binary})")
+                return ver
+        except Exception:
+            continue
+    print("Warning: Could not detect Chrome version. Letting undetected_chromedriver decide.")
+    return None
+
+
 def _build_driver() -> uc.Chrome:
     """Spin up an undetected Chromium instance (headless via Xvfb on Linux)."""
     options = uc.ChromeOptions()
@@ -101,8 +119,12 @@ def _build_driver() -> uc.Chrome:
     options.add_argument("--window-size=1280,800")
     # Do NOT pass headless=True so Medium doesn't trigger bot protection.
     # Xvfb provides a virtual display on the Linux runner.
-    # Specify version_main=149 to match the Chrome version on ubuntu-latest
-    driver = uc.Chrome(options=options, version_main=149, headless=False)
+    # Auto-detect Chrome version to avoid hardcoded version mismatches
+    chrome_ver = _detect_chrome_version()
+    kwargs = dict(options=options, headless=False)
+    if chrome_ver:
+        kwargs["version_main"] = chrome_ver
+    driver = uc.Chrome(**kwargs)
     return driver
 
 
