@@ -15,6 +15,13 @@ class FailureContext:
 
 
 @dataclass(frozen=True)
+class CodeHunk:
+    """Immutable search-and-replace hunk for surgical code patching."""
+    target: str
+    replacement: str
+
+
+@dataclass(frozen=True)
 class DiagnosisResult:
     """
     Immutable AI diagnosis result.
@@ -28,6 +35,7 @@ class DiagnosisResult:
     root_cause: str
     target_file: Optional[str] = None
     patched_content: Optional[str] = None
+    patches: tuple[CodeHunk, ...] = ()
     secret_name: Optional[str] = None
 
 

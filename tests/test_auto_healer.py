@@ -295,6 +295,30 @@ def test_execute_heal_workflow_all_outcomes(tmp_path: Path):
     assert outcome["action"] == "CODE_FIXED"
     assert f_path.read_text(encoding="utf-8") == patched_code
 
+    # 1b. CODE_FIX via surgical patches (hunks) on non-traceback GitHub Actions log
+    f_path.write_text(orig_code, encoding="utf-8")
+    gh_log = (
+        "2026-10-12T03:31:58.8818528Z Entering canonical URL: https://smartinfralog.com/posts/1\n"
+        "2026-10-12T03:31:58.8835490Z Umami NOC alert check failed\n"
+        "2026-10-12T03:32:04.6135516Z ##[error]Process completed with exit code 1.\n"
+        "2026-10-12T03:32:05.0000000Z Post job cleanup.\n"
+    )
+    outcome_hunk = execute_heal_workflow(
+        run_id="559",
+        workflow_name="NOC ChatOps Alert Engine",
+        raw_log=gh_log,
+        project_root=str(tmp_path),
+        api_key="dummy-key",
+        llm_responder=lambda _s, _u: json.dumps({
+            "category": "CODE_FIX",
+            "root_cause": "Surgical patch applied to x_0",
+            "target_file": "module_noc_alerts/main.py",
+            "patches": [{"target": "x_0 = 0", "replacement": "x_0 = 999"}],
+        }),
+    )
+    assert outcome_hunk["action"] == "CODE_FIXED"
+    assert "x_0 = 999" in f_path.read_text(encoding="utf-8")
+
     # 2. CODE_FIX rejected by guardrail (syntax error)
     outcome_rejected = execute_heal_workflow(
         run_id="556",

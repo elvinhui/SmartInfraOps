@@ -14,6 +14,7 @@ from typing import Any, Callable, Optional
 import requests
 
 from module_auto_healer.analyzer import (
+    apply_code_hunks,
     apply_vulnerability_fixes,
     diagnose_failure,
     extract_error_snippet,
@@ -119,19 +120,19 @@ def execute_heal_workflow(
             "secret_name": diagnosis.secret_name,
         }
 
-    if (
-        diagnosis.category == "CODE_FIX"
-        and diagnosis.target_file
-        and diagnosis.patched_content
-    ):
+    if diagnosis.category == "CODE_FIX" and diagnosis.target_file:
         target_rel = diagnosis.target_file.replace("\\", "/").lstrip("./")
         full_path = Path(project_root).resolve() / target_rel
         original_content = (
             full_path.read_text(encoding="utf-8") if full_path.is_file() else ""
         )
 
+        candidate_content = diagnosis.patched_content or ""
+        if diagnosis.patches and original_content:
+            candidate_content = apply_code_hunks(original_content, diagnosis.patches)
+
         is_valid, reason = validate_patch(
-            target_rel, original_content, diagnosis.patched_content, project_root
+            target_rel, original_content, candidate_content, project_root
         )
         if not is_valid:
             return {
@@ -141,7 +142,7 @@ def execute_heal_workflow(
                 "secret_name": None,
             }
 
-        full_path.write_text(diagnosis.patched_content, encoding="utf-8")
+        full_path.write_text(candidate_content, encoding="utf-8")
         return {
             "action": "CODE_FIXED",
             "root_cause": diagnosis.root_cause,

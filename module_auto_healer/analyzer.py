@@ -7,38 +7,64 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from module_auto_healer.models import (
+    CodeHunk,
     DiagnosisResult,
     FailureContext,
     VulnerabilityFix,
 )
-from module_auto_healer.validator import is_safe_target_path
+from module_auto_healer.validator import ALLOWED_MODULE_DIRS, is_safe_target_path
 
 FILE_REF_PATTERN = re.compile(
-    r'(?:File\s+"|in\s+)([a-zA-Z0-9_./\\-]+\.py)'
+    r'(?:File\s+"|in\s+)([a-zA-Z0-9_./\\:-]+\.py)'
 )
+
+GH_LOG_PREFIX_PATTERN = re.compile(
+    r"^.*?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\s?"
+)
+
+
+def _strip_gh_prefixes(text: str) -> str:
+    """Removes GitHub Actions runner timestamps and job/step prefixes from log lines."""
+    cleaned = [GH_LOG_PREFIX_PATTERN.sub("", line) for line in text.splitlines()]
+    return "\n".join(cleaned)
 
 
 def extract_error_snippet(raw_log: str, max_chars: int = 4000) -> str:
     """
-    Extracts the most relevant error/traceback tail from a GitHub Actions log.
+    Extracts the most relevant error/traceback window from a GitHub Actions log,
+    stripping runner timestamps and cutting off post-failure artifact/cleanup noise.
     """
     if not raw_log:
         return ""
 
-    tb_idx = raw_log.rfind("Traceback (most recent call last):")
+    cleaned_log = _strip_gh_prefixes(raw_log)
+
+    # Cut off post-failure cleanup steps if `##[error]Process completed with exit code` is present
+    err_marker = "##[error]Process completed with exit code"
+    err_idx = cleaned_log.find(err_marker)
+    relevant_log = (
+        cleaned_log[: err_idx + len(err_marker) + 50]
+        if err_idx != -1
+        else cleaned_log
+    )
+
+    tb_idx = relevant_log.rfind("Traceback (most recent call last):")
     if tb_idx != -1:
-        snippet = raw_log[tb_idx:]
-        return snippet[:max_chars]
+        return relevant_log[tb_idx:][:max_chars]
+
+    # If there is no Python traceback, preserve the last ~60 lines before `##[error]`
+    if err_idx != -1:
+        lines_before = relevant_log.splitlines()[-65:]
+        return "\n".join(lines_before)[-max_chars:]
 
     lines = [
-        line for line in raw_log.splitlines()
+        line for line in relevant_log.splitlines()
         if any(k in line.lower() for k in ("error", "exception", "fatal", "failed", "traceback"))
     ]
     if lines:
-        joined = "\n".join(lines[-40:])
-        return joined[-max_chars:]
+        return "\n".join(lines[-40:])[-max_chars:]
 
-    return raw_log[-max_chars:]
+    return relevant_log[-max_chars:]
 
 
 def extract_referenced_files(
@@ -46,8 +72,8 @@ def extract_referenced_files(
     project_root: str,
 ) -> tuple[tuple[str, str], ...]:
     """
-    Finds allowed project Python files referenced in the traceback and reads their contents.
-    Returns an immutable tuple of (relative_path, file_content).
+    Finds allowed project Python files referenced in the traceback or matching
+    logged failure messages, and returns an immutable tuple of (relative_path, file_content).
     """
     matches = FILE_REF_PATTERN.findall(error_snippet)
     seen: set[str] = set()
@@ -56,11 +82,15 @@ def extract_referenced_files(
 
     for match in matches:
         normalized = match.replace("\\", "/").lstrip("./")
-        # Also handle when workflow ran `cd module_distributor` so traceback says `File "orchestrator.py"`
+        parts = normalized.split("/")
+        # Handle full runner paths like /home/runner/work/SmartInfraOps/SmartInfraOps/module_distributor/foo.py
+        rel_tail = "/".join(parts[-2:]) if len(parts) >= 2 else normalized
+        basename = parts[-1]
         candidates = [
             normalized,
-            f"module_distributor/{normalized}",
-            f"module_noc_alerts/{normalized}",
+            rel_tail,
+            f"module_distributor/{basename}",
+            f"module_noc_alerts/{basename}",
         ]
         for candidate in candidates:
             if candidate in seen:
@@ -69,11 +99,40 @@ def extract_referenced_files(
                 full_path = root_path / candidate
                 if full_path.is_file():
                     seen.add(candidate)
-                    content = full_path.read_text(encoding="utf-8")
-                    results.append((candidate, content))
+                    results.append((candidate, full_path.read_text(encoding="utf-8")))
                     break
 
+    # Heuristic fallback when code catches exceptions and logs custom error messages without Traceback
+    if not results:
+        snippet_lower = error_snippet.lower()
+        keyword_to_file = (
+            (("medium", "import page", "canonical url"), "module_distributor/medium_import.py"),
+            (("twitter", "x_auth", "tweet"), "module_distributor/twitter_playwright.py"),
+            (("linkedin",), "module_distributor/linkedin_api.py"),
+            (("deepseek", "polish"), "module_distributor/deepseek_polish.py"),
+            (("umami", "noc"), "module_noc_alerts/main.py"),
+        )
+        for keywords, rel_candidate in keyword_to_file:
+            if any(kw in snippet_lower for kw in keywords):
+                if is_safe_target_path(rel_candidate, project_root):
+                    full_path = root_path / rel_candidate
+                    if full_path.is_file() and rel_candidate not in seen:
+                        seen.add(rel_candidate)
+                        results.append((rel_candidate, full_path.read_text(encoding="utf-8")))
+
     return tuple(results)
+
+
+def apply_code_hunks(original_content: str, hunks: tuple[CodeHunk, ...]) -> str:
+    """
+    Immutably applies a sequence of search-and-replace hunks to `original_content`.
+    Returns the new content string.
+    """
+    updated = original_content
+    for hunk in hunks:
+        if hunk.target and hunk.target in updated:
+            updated = updated.replace(hunk.target, hunk.replacement, 1)
+    return updated
 
 
 def _default_llm_responder(
@@ -120,14 +179,16 @@ def diagnose_failure(
         "Output ONLY a valid JSON object with these keys:\n"
         '- "category": One of ["TRANSIENT", "CODE_FIX", "CREDENTIALS_EXPIRED", "UNFIXABLE"]\n'
         '- "root_cause": Concise 1-2 sentence explanation of why the workflow failed.\n'
-        '- "target_file": Relative path (e.g. "module_distributor/orchestrator.py") if category is "CODE_FIX", else null.\n'
-        '- "patched_content": Full, complete replacement file content if category is "CODE_FIX", else null.\n'
+        '- "target_file": Relative path (e.g. "module_distributor/medium_import.py") if category is "CODE_FIX", else null.\n'
+        '- "patches": A list of {"target": "<exact lines to find>", "replacement": "<new lines>"} objects '
+        'for surgical code fixes when category is "CODE_FIX". Always prefer "patches" over regenerating large files.\n'
+        '- "patched_content": Optional full replacement file content ONLY if the file is very short (<100 lines), else null.\n'
         '- "secret_name": Name of the expired GitHub Secret (e.g. "MEDIUM_AUTH_JSON_BASE64", "X_AUTH_JSON_BASE64") '
         'if category is "CREDENTIALS_EXPIRED", else null.\n'
         "Rules:\n"
         "1. Never hardcode secrets or tokens.\n"
-        "2. Preserve all existing functions and logic not related to the bug.\n"
-        "3. Use category 'TRANSIENT' for network timeouts, 502/503 HTTP errors, or temporary rate limits."
+        "2. In 'patches', 'target' MUST be an exact, verbatim substring from the source file.\n"
+        "3. Use category 'CODE_FIX' if a selector, DOM readiness check, input fallback, or logic bug caused the failure."
     )
 
     files_section = "\n\n".join(
@@ -151,11 +212,22 @@ def diagnose_failure(
         if category not in {"TRANSIENT", "CODE_FIX", "CREDENTIALS_EXPIRED", "UNFIXABLE"}:
             category = "UNFIXABLE"
 
+        raw_patches = parsed.get("patches") or []
+        hunks = tuple(
+            CodeHunk(
+                target=str(item.get("target", "")),
+                replacement=str(item.get("replacement", "")),
+            )
+            for item in raw_patches
+            if isinstance(item, dict) and item.get("target")
+        )
+
         return DiagnosisResult(
             category=category,
             root_cause=str(parsed.get("root_cause", "Unknown failure")),
             target_file=parsed.get("target_file"),
             patched_content=parsed.get("patched_content"),
+            patches=hunks,
             secret_name=parsed.get("secret_name"),
         )
     except Exception as exc:
