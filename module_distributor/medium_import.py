@@ -227,7 +227,10 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                             b => (b.innerText || '').toLowerCase().includes('import')
                         );
                         var hasImportBtn = !!importBtn;
-                        var hasInput = !!document.querySelector('input:not([type="hidden"])');
+                        // Medium's import page may use either an <input> or a contenteditable <div>
+                        // for the URL field, so accept either as a valid input indicator.
+                        var hasInput = !!document.querySelector('input:not([type="hidden"])') ||
+                                       !!document.querySelector('div[contenteditable="true"]');
 
                         // Critical: check that the page is actually styled/rendered, not degraded
                         // A degraded page may have stylesheets loaded but no actual CSS applied
