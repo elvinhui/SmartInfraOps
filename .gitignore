@@ -25,9 +25,15 @@ medium_auth.json
 
 # Others
 *.png
+*.log
+*.exe
+*.zip
 *_dump.txt
 *dump.txt
 *auth.json
 *auth_*.json
 apollo.json
-test_*.py
+/test_*.py
+.coverage
+.pytest_cache/
+
