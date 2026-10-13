@@ -21,6 +21,7 @@ from module_auto_healer.analyzer import (
     apply_vulnerability_fixes,
 )
 from module_auto_healer.healer import (
+    build_completion_slack_payload,
     build_heal_webhook_payload,
     execute_heal_workflow,
     send_noc_notification,
@@ -415,3 +416,43 @@ def test_cli_main_audit_fix_and_heal_run(tmp_path: Path, monkeypatch):
     assert rc2 == 0
     assert "action=UNFIXABLE" in gh_out.read_text(encoding="utf-8")
     assert send_noc_notification("", {}) is False
+
+
+def test_notify_complete_slack_integration(monkeypatch):
+    sent_requests = []
+
+    class DummyResp:
+        def raise_for_status(self):
+            return None
+
+    def fake_post(url, json=None, timeout=10):
+        sent_requests.append((url, json))
+        return DummyResp()
+
+    monkeypatch.setattr("module_auto_healer.healer.requests.post", fake_post)
+    monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/T00/B00/X00")
+
+    payload = build_completion_slack_payload(
+        workflow_name="Content Auto Distributor",
+        target_file="module_distributor/medium_import.py",
+        branch_name="auto-fix/run-123",
+        root_cause="Fixed selector readiness check",
+        run_url="https://github.com/elvinhui/SmartInfraOps/actions/runs/123",
+    )
+    assert "text" in payload
+    assert "blocks" in payload
+    assert "module_distributor/medium_import.py" in json.dumps(payload)
+
+    rc = healer_main([
+        "--mode", "notify-complete",
+        "--workflow-name", "Content Auto Distributor",
+        "--target-file", "module_distributor/medium_import.py",
+        "--branch-name", "auto-fix/run-123",
+        "--root-cause", "Fixed selector readiness check",
+        "--run-url", "https://github.com/elvinhui/SmartInfraOps/actions/runs/123",
+    ])
+    assert rc == 0
+    assert len(sent_requests) == 1
+    assert sent_requests[0][0] == "https://hooks.slack.com/services/T00/B00/X00"
+    assert "auto-fix/run-123" in json.dumps(sent_requests[0][1])
+

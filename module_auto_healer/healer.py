@@ -25,14 +25,14 @@ from module_auto_healer.validator import validate_patch
 
 
 def build_heal_webhook_payload(workflow_name: str, outcome: dict[str, Any]) -> dict[str, Any]:
-    """Builds an immutable Slack Block Kit payload summarizing the self-healing action."""
+    """Builds an immutable Slack Block Kit payload summarizing the self-healing diagnosis."""
     action = outcome.get("action", "UNFIXABLE")
     root_cause = outcome.get("root_cause", "No details available.")
     target_file = outcome.get("target_file")
     secret_name = outcome.get("secret_name")
 
     status_map = {
-        "CODE_FIXED": "🛠️ *AI 已自动生成修复分支并验证通过*",
+        "CODE_FIXED": "🛠️ *AI 已定位故障并生成补丁，正在创建分支运行 Pytest 验证...*",
         "TRANSIENT_RERUN": "🔄 *检测到临时性网络/限流抖动，已触发自动重跑*",
         "CREDENTIALS_EXPIRED": "🔑 *检测到凭证/Cookie 过期，需人工更新 Secret*",
         "UNFIXABLE": "⚠️ *自动修复未命中安全规则，需人工排查*",
@@ -46,6 +46,7 @@ def build_heal_webhook_payload(workflow_name: str, outcome: dict[str, Any]) -> d
         detail_lines.append(f"*Expired Secret:* `{secret_name}`")
 
     return {
+        "text": f"[SmartInfraOps Auto-Healer] {status_label} - {workflow_name}",
         "blocks": [
             {
                 "type": "header",
@@ -63,12 +64,50 @@ def build_heal_webhook_payload(workflow_name: str, outcome: dict[str, Any]) -> d
                 "type": "section",
                 "text": {"type": "mrkdwn", "text": "\n".join(detail_lines)},
             },
-        ]
+        ],
+    }
+
+
+def build_completion_slack_payload(
+    workflow_name: str,
+    target_file: str,
+    branch_name: str,
+    root_cause: str,
+    run_url: str = "",
+) -> dict[str, Any]:
+    """Builds an immutable Slack Block Kit payload when auto-fix verification & merge complete."""
+    detail_lines = [
+        f"*Project:* `SmartInfraOps`",
+        f"*Workflow:* `{workflow_name}`",
+        f"*Patched File:* `{target_file}`",
+        f"*Fix Branch:* `{branch_name}` (Merged to `main` ✅)",
+        f"*Verification:* `py_compile` + `pytest` PASSED ✅",
+        f"*Root Cause:* {root_cause}",
+    ]
+    if run_url:
+        detail_lines.append(f"*Actions Run:* <{run_url}|查看 GitHub Actions 运行详情>")
+
+    return {
+        "text": f"✅ [SmartInfraOps] 自动修复已完成并合并上线: {target_file}",
+        "blocks": [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": "✅ SmartInfraOps | 自动修复完成通知 (Merged & Redeployed)",
+                    "emoji": True,
+                },
+            },
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "\n".join(detail_lines)},
+            },
+        ],
     }
 
 
 def send_noc_notification(webhook_url: str, payload: dict[str, Any]) -> bool:
-    """Sends a notification card to NOC_WEBHOOK_URL if configured."""
+    """Sends a notification card to SLACK_WEBHOOK_URL / NOC_WEBHOOK_URL if configured."""
     if not webhook_url:
         return False
     try:
@@ -78,6 +117,7 @@ def send_noc_notification(webhook_url: str, payload: dict[str, Any]) -> bool:
     except Exception as exc:
         print(f"Warning: Failed to send NOC notification: {exc}")
         return False
+
 
 
 def execute_heal_workflow(
@@ -173,9 +213,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="SmartInfraOps Auto-Healer CLI")
     parser.add_argument(
         "--mode",
-        choices=["heal-run", "audit-fix"],
+        choices=["heal-run", "audit-fix", "notify-complete"],
         required=True,
-        help="Operation mode: heal a failed workflow run or apply pip-audit fixes.",
+        help="Operation mode: heal-run, audit-fix, or notify-complete.",
     )
     parser.add_argument("--run-id", default="", help="Failed GitHub Actions run ID")
     parser.add_argument("--workflow-name", default="Workflow", help="Failed workflow name")
@@ -183,9 +223,28 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--audit-json-file", default="", help="Path to pip-audit JSON file")
     parser.add_argument("--requirements-file", default="", help="Path to requirements.txt")
     parser.add_argument("--project-root", default=".", help="Repository root path")
+    parser.add_argument("--target-file", default="", help="Patched file path for notify-complete")
+    parser.add_argument("--branch-name", default="", help="Merged fix branch name for notify-complete")
+    parser.add_argument("--root-cause", default="", help="Root cause description for notify-complete")
+    parser.add_argument("--run-url", default="", help="GitHub Actions run URL for notify-complete")
     args = parser.parse_args(argv)
 
-    webhook_url = os.getenv("NOC_WEBHOOK_URL", "")
+    webhook_url = os.getenv("SLACK_WEBHOOK_URL") or os.getenv("NOC_WEBHOOK_URL") or ""
+
+    if args.mode == "notify-complete":
+        if webhook_url:
+            payload = build_completion_slack_payload(
+                workflow_name=args.workflow_name,
+                target_file=args.target_file or "requirements.txt",
+                branch_name=args.branch_name or "main",
+                root_cause=args.root_cause or "Automated verification and PR merge completed.",
+                run_url=args.run_url,
+            )
+            sent = send_noc_notification(webhook_url, payload)
+            print(f"Slack completion notification sent: {sent}")
+        else:
+            print("Notice: SLACK_WEBHOOK_URL / NOC_WEBHOOK_URL not configured.")
+        return 0
 
     if args.mode == "audit-fix":
         req_path = Path(args.requirements_file)
@@ -243,3 +302,4 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
