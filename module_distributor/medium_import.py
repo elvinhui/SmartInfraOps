@@ -320,8 +320,16 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                                 for char in canonical_url:
                                     ActionChains(driver).send_keys(char).perform()
                                     time.sleep(random.uniform(0.03, 0.08))
-                                url_entered = True
-                                print("URL entered via ActionChains typing.")
+                                # Verify the value actually landed in the element (React may have swallowed it)
+                                actual_value = driver.execute_script(
+                                    "var el = arguments[0]; return (el.value !== undefined ? el.value : el.textContent) || '';",
+                                    input_elem,
+                                )
+                                if canonical_url.strip() in (actual_value or ''):
+                                    url_entered = True
+                                    print("URL entered via ActionChains typing.")
+                                else:
+                                    print(f"ActionChains typing did not persist (got: {actual_value!r}). Trying next method.")
                             except Exception as e1:
                                 print(f"ActionChains typing failed: {e1}")
 
@@ -331,8 +339,15 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                                     if tag == 'input':
                                         input_elem.clear()
                                     human_typing(input_elem, canonical_url)
-                                    url_entered = True
-                                    print("URL entered via element.send_keys.")
+                                    actual_value = driver.execute_script(
+                                        "var el = arguments[0]; return (el.value !== undefined ? el.value : el.textContent) || '';",
+                                        input_elem,
+                                    )
+                                    if canonical_url.strip() in (actual_value or ''):
+                                        url_entered = True
+                                        print("URL entered via element.send_keys.")
+                                    else:
+                                        print(f"element.send_keys did not persist (got: {actual_value!r}). Trying next method.")
                                 except Exception as e2:
                                     print(f"element.send_keys failed: {e2}")
 
@@ -342,8 +357,15 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                                 driver.execute_script("""
                                     var el = arguments[0], url = arguments[1];
                                     if (el.tagName.toLowerCase() === 'div') {
-                                        el.textContent = url;
-                                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                                        // Use execCommand so React's contenteditable listeners fire
+                                        el.focus();
+                                        var sel = window.getSelection();
+                                        var range = document.createRange();
+                                        range.selectNodeContents(el);
+                                        sel.removeAllRanges();
+                                        sel.addRange(range);
+                                        document.execCommand('insertText', false, url);
+                                        el.dispatchEvent(new InputEvent('input', { bubbles: true, data: url, inputType: 'insertText' }));
                                     } else {
                                         var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
                                         if (setter) setter.call(el, url);
@@ -355,11 +377,20 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                                         el.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', bubbles: true }));
                                     }
                                 """, input_elem, canonical_url)
-                                url_entered = True
-                                print("URL entered via JS injection.")
+                                time.sleep(0.5)
+                                actual_value = driver.execute_script(
+                                    "var el = arguments[0]; return (el.value !== undefined ? el.value : el.textContent) || '';",
+                                    input_elem,
+                                )
+                                if canonical_url.strip() in (actual_value or ''):
+                                    url_entered = True
+                                    print("URL entered via JS injection.")
+                                else:
+                                    print(f"JS injection did not persist (got: {actual_value!r}).")
 
-                            found_input = True
-                            break
+                            if url_entered:
+                                found_input = True
+                                break
                         except Exception as e:
                             print(f"Error interacting with input: {e}")
                     time.sleep(2)
@@ -422,6 +453,9 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                 if not import_clicked:
                     driver.save_screenshot("module_distributor/error_medium_no_import_btn.png")
                     raise Exception("Failed to find or click enabled Import button. React state might not have updated.")
+
+                # Give Medium's backend a moment to register the import request
+                time.sleep(3)
 
                 # ── Step 5: Wait for "See your story" / redirect to editor ────────
                 print("Waiting for import to complete...")
