@@ -276,30 +276,57 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                 found_input = False
                 for retry in range(15):
                     input_elem = driver.execute_script("""
-                        // Exact target based on Medium DOM
-                        var exact = document.querySelector('.js-importUrl, [data-default-value*="yoursite"]');
-                        if (exact) return exact;
-
-                        // Prefer <input> elements first (more reliable for typing)
-                        var inputs = document.querySelectorAll('input:not([type="hidden"])');
-                        for (var i = 0; i < inputs.length; i++) {
-                            var rect = inputs[i].getBoundingClientRect();
-                            if (rect.width > 0 && rect.height > 0 && rect.top > 50) return inputs[i];
+                        function isEditable(el) {
+                            if (!el) return false;
+                            var tag = el.tagName.toLowerCase();
+                            if (tag === 'input' || tag === 'textarea') return true;
+                            if (tag === 'div' && el.getAttribute('contenteditable') === 'true') return true;
+                            return false;
                         }
+                        function isVisible(el) {
+                            if (!el) return false;
+                            var rect = el.getBoundingClientRect();
+                            if (rect.width <= 0 || rect.height <= 0) return false;
+                            var style = window.getComputedStyle(el);
+                            if (style.visibility === 'hidden' || style.display === 'none') return false;
+                            if (parseFloat(style.opacity) === 0) return false;
+                            return true;
+                        }
+                        function isInteractable(el) {
+                            if (!isEditable(el) || !isVisible(el)) return false;
+                            if (el.disabled) return false;
+                            if (el.readOnly) return false;
+                            return true;
+                        }
+
+                        // Exact target based on Medium DOM — but only if it's actually editable
+                        var exact = document.querySelector('.js-importUrl, [data-default-value*="yoursite"]');
+                        if (isInteractable(exact)) return exact;
+
+                        // Prefer real <input>/<textarea> elements first (most reliable for typing)
+                        var inputs = document.querySelectorAll('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]), textarea');
+                        for (var i = 0; i < inputs.length; i++) {
+                            if (isInteractable(inputs[i])) return inputs[i];
+                        }
+
                         // Fallback to contenteditable divs (only if no input found)
                         var divs = document.querySelectorAll('div[contenteditable="true"]');
                         for (var i = 0; i < divs.length; i++) {
-                            var rect = divs[i].getBoundingClientRect();
-                            if (rect.width > 0 && rect.height > 0 && rect.top > 100) {
-                                // Only accept div if the page appears fully loaded
-                                if (document.styleSheets.length >= 2) return divs[i];
-                            }
+                            if (isInteractable(divs[i])) return divs[i];
                         }
                         return null;
                     """)
                     if input_elem:
                         tag = input_elem.tag_name.lower()
-                        print(f"Found URL input element: <{tag}>")
+                        is_editable = driver.execute_script(
+                            "var el = arguments[0]; return el.isContentEditable === true || el.tagName.toLowerCase() === 'input' || el.tagName.toLowerCase() === 'textarea';",
+                            input_elem,
+                        )
+                        if not is_editable:
+                            print(f"Found element <{tag}> but it is not editable. Skipping.")
+                            time.sleep(2)
+                            continue
+                        print(f"Found URL input element: <{tag}> (editable)")
                         try:
                             # Scroll into view
                             driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", input_elem)
