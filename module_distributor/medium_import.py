@@ -416,6 +416,14 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                                     print(f"JS injection did not persist (got: {actual_value!r}).")
 
                             if url_entered:
+                                # Blur the input so React commits the value to its state
+                                # before we click Import. Without this, the Import button
+                                # can fire before the URL is registered server-side.
+                                try:
+                                    driver.execute_script("arguments[0].blur();", input_elem)
+                                except Exception:
+                                    pass
+                                time.sleep(1.0)
                                 found_input = True
                                 break
                         except Exception as e:
@@ -487,8 +495,26 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                 # ── Step 5: Wait for "See your story" / redirect to editor ────────
                 print("Waiting for import to complete...")
                 see_story_clicked = False
+                import_error_msg = None
                 for _ in range(25):
                     time.sleep(2)
+                    # Detect Medium's inline import error (e.g. "We couldn't import that URL")
+                    err = driver.execute_script("""
+                        var els = document.querySelectorAll('[role=\"alert\"], .error, .js-errorMessage, div, p, span');
+                        for (var i = 0; i < els.length; i++) {
+                            var txt = (els[i].innerText || '').toLowerCase();
+                            if (txt.includes("couldn't import") || txt.includes('could not import') ||
+                                txt.includes('unable to import') || txt.includes('invalid url') ||
+                                txt.includes('try again')) {
+                                return (els[i].innerText || '').trim();
+                            }
+                        }
+                        return null;
+                    """)
+                    if err:
+                        import_error_msg = err
+                        print(f"Medium reported import error: {err}")
+                        break
                     clicked = driver.execute_script("""
                         var els = document.querySelectorAll('button, a');
                         for (var i = 0; i < els.length; i++) {
@@ -513,6 +539,8 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
 
                 if not see_story_clicked:
                     driver.save_screenshot(f"module_distributor/error_medium_no_see_story_attempt{import_retry + 1}.png")
+                    if import_error_msg:
+                        raise Exception(f"Medium rejected the import: {import_error_msg}")
                     raise Exception(f"Did not transition to editor. Current URL: {driver.current_url}")
 
                 # Wait for editor to fully load
