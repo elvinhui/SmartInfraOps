@@ -490,13 +490,31 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                     raise Exception("Failed to find or click enabled Import button. React state might not have updated.")
 
                 # Give Medium's backend a moment to register the import request
+                # and wait for the Import button to become disabled (indicating the
+                # request was actually submitted) before polling for the editor.
                 time.sleep(3)
+                for _submit_wait in range(10):
+                    submit_state = driver.execute_script("""
+                        var btns = document.querySelectorAll('button');
+                        for (var i = 0; i < btns.length; i++) {
+                            var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
+                            if (txt.includes('import')) {
+                                var disabled = btns[i].disabled || btns[i].getAttribute('aria-disabled') === 'true';
+                                return { found: true, disabled: disabled, text: txt };
+                            }
+                        }
+                        return { found: false, disabled: false, text: '' };
+                    """)
+                    if submit_state.get('disabled'):
+                        print("Import button is now disabled (request submitted).")
+                        break
+                    time.sleep(1)
 
                 # ── Step 5: Wait for "See your story" / redirect to editor ────────
                 print("Waiting for import to complete...")
                 see_story_clicked = False
                 import_error_msg = None
-                for _ in range(25):
+                for _ in range(40):
                     time.sleep(2)
                     # Detect Medium's inline import error (e.g. "We couldn't import that URL")
                     err = driver.execute_script("""
@@ -536,6 +554,20 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         print("Auto-redirected to editor.")
                         see_story_clicked = True
                         break
+                    # Detect a "processing"/spinner state indicating the import is in progress
+                    processing = driver.execute_script("""
+                        var allText = document.body ? document.body.innerText.toLowerCase() : '';
+                        if (allText.includes('importing') || allText.includes('processing') || allText.includes('please wait')) return true;
+                        var spinners = document.querySelectorAll('[role=\"progressbar\"], .spinner, [class*=\"loading\"], [class*=\"Spinner\"]');
+                        for (var i = 0; i < spinners.length; i++) {
+                            var r = spinners[i].getBoundingClientRect();
+                            if (r.width > 0 && r.height > 0) return true;
+                        }
+                        return false;
+                    """)
+                    if processing:
+                        print("Import in progress (spinner detected)...")
+                        continue
 
                 if not see_story_clicked:
                     driver.save_screenshot(f"module_distributor/error_medium_no_see_story_attempt{import_retry + 1}.png")
