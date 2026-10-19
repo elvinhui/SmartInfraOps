@@ -514,7 +514,8 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                 print("Waiting for import to complete...")
                 see_story_clicked = False
                 import_error_msg = None
-                for _ in range(40):
+                # Medium's import can take a while; poll up to ~3 minutes
+                for _ in range(90):
                     time.sleep(2)
                     # Detect Medium's inline import error (e.g. "We couldn't import that URL")
                     err = driver.execute_script("""
@@ -568,6 +569,23 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                     if processing:
                         print("Import in progress (spinner detected)...")
                         continue
+
+                    # Detect that the import request was accepted: the Import button
+                    # becomes disabled or the URL input is cleared after submission.
+                    submitted = driver.execute_script("""
+                        var btns = document.querySelectorAll('button');
+                        for (var i = 0; i < btns.length; i++) {
+                            var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
+                            if (txt.includes('import')) {
+                                if (btns[i].disabled || btns[i].getAttribute('aria-disabled') === 'true') return true;
+                            }
+                        }
+                        var inp = document.querySelector('.js-importUrl, input:not([type=\"hidden\"])');
+                        if (inp && inp.value === '') return true;
+                        return false;
+                    """)
+                    if submitted:
+                        print("Import request accepted (button disabled / input cleared). Continuing to wait for editor...")
 
                 if not see_story_clicked:
                     driver.save_screenshot(f"module_distributor/error_medium_no_see_story_attempt{import_retry + 1}.png")
