@@ -568,7 +568,10 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                     """)
                     if processing:
                         print("Import in progress (spinner detected)...")
-                        continue
+                        # Do NOT 'continue' here — still fall through to check for
+                        # editor transition / 'See your story' on the next iteration.
+                        # A persistent spinner with no transition is a known Medium
+                        # failure mode; the loop timeout below handles it.
 
                     # Detect that the import request was accepted: the Import button
                     # becomes disabled or the URL input is cleared after submission.
@@ -591,7 +594,33 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                     driver.save_screenshot(f"module_distributor/error_medium_no_see_story_attempt{import_retry + 1}.png")
                     if import_error_msg:
                         raise Exception(f"Medium rejected the import: {import_error_msg}")
-                    raise Exception(f"Did not transition to editor. Current URL: {driver.current_url}")
+                    # Fallback: Medium sometimes leaves a persistent spinner and never
+                    # surfaces 'See your story'. Navigate directly to the drafts list
+                    # and open the most recently imported draft to recover.
+                    print("No editor transition detected. Attempting drafts-list recovery...")
+                    try:
+                        driver.get("https://medium.com/me/stories/drafts")
+                        time.sleep(5)
+                        opened = driver.execute_script("""
+                            var links = document.querySelectorAll('a[href*="/edit"], a[href*="/p/"]');
+                            for (var i = 0; i < links.length; i++) {
+                                var href = links[i].getAttribute('href') || '';
+                                if (href.indexOf('/edit') !== -1 || href.indexOf('/p/') !== -1) {
+                                    links[i].click();
+                                    return true;
+                                }
+                            }
+                            return false;
+                        """)
+                        if opened:
+                            time.sleep(8)
+                            if "/edit" in driver.current_url or "/p/" in driver.current_url:
+                                print(f"Recovered via drafts list. Current URL: {driver.current_url}")
+                                see_story_clicked = True
+                    except Exception as rec_err:
+                        print(f"Drafts-list recovery failed: {rec_err}")
+                    if not see_story_clicked:
+                        raise Exception(f"Did not transition to editor. Current URL: {driver.current_url}")
 
                 # Wait for editor to fully load
                 time.sleep(8)
