@@ -493,7 +493,8 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                 # and wait for the Import button to become disabled (indicating the
                 # request was actually submitted) before polling for the editor.
                 time.sleep(3)
-                for _submit_wait in range(10):
+                submit_confirmed = False
+                for _submit_wait in range(15):
                     submit_state = driver.execute_script("""
                         var btns = document.querySelectorAll('button');
                         for (var i = 0; i < btns.length; i++) {
@@ -507,8 +508,21 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                     """)
                     if submit_state.get('disabled'):
                         print("Import button is now disabled (request submitted).")
+                        submit_confirmed = True
                         break
                     time.sleep(1)
+                if not submit_confirmed:
+                    # The click may not have registered with React. Re-click the
+                    # Import button once via JS to force submission before polling.
+                    print("Import button did not become disabled; re-clicking via JS to force submission...")
+                    driver.execute_script("""
+                        var btns = document.querySelectorAll('button');
+                        for (var i = 0; i < btns.length; i++) {
+                            var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
+                            if (txt.includes('import')) { btns[i].click(); return; }
+                        }
+                    """)
+                    time.sleep(3)
 
                 # ── Step 5: Wait for "See your story" / redirect to editor ────────
                 print("Waiting for import to complete...")
@@ -600,19 +614,24 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                     print("No editor transition detected. Attempting drafts-list recovery...")
                     try:
                         driver.get("https://medium.com/me/stories/drafts")
-                        time.sleep(5)
-                        opened = driver.execute_script("""
+                        time.sleep(6)
+                        # Collect candidate draft edit links and navigate directly
+                        # (clicking can be intercepted by overlays / SPA routing).
+                        edit_href = driver.execute_script("""
                             var links = document.querySelectorAll('a[href*="/edit"], a[href*="/p/"]');
                             for (var i = 0; i < links.length; i++) {
                                 var href = links[i].getAttribute('href') || '';
                                 if (href.indexOf('/edit') !== -1 || href.indexOf('/p/') !== -1) {
-                                    links[i].click();
-                                    return true;
+                                    return href;
                                 }
                             }
-                            return false;
+                            return null;
                         """)
-                        if opened:
+                        if edit_href:
+                            if edit_href.startswith('/'):
+                                edit_href = 'https://medium.com' + edit_href
+                            print(f"Opening most recent draft: {edit_href}")
+                            driver.get(edit_href)
                             time.sleep(8)
                             if "/edit" in driver.current_url or "/p/" in driver.current_url:
                                 print(f"Recovered via drafts list. Current URL: {driver.current_url}")
