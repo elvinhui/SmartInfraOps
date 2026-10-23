@@ -523,6 +523,28 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         }
                     """)
                     time.sleep(3)
+                    # Re-verify submission after the forced JS click; if still not
+                    # confirmed, treat this attempt as failed so the retry loop
+                    # can re-navigate and re-enter the URL cleanly.
+                    for _submit_wait2 in range(10):
+                        submit_state2 = driver.execute_script("""
+                            var btns = document.querySelectorAll('button');
+                            for (var i = 0; i < btns.length; i++) {
+                                var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
+                                if (txt.includes('import')) {
+                                    var disabled = btns[i].disabled || btns[i].getAttribute('aria-disabled') === 'true';
+                                    return { found: true, disabled: disabled };
+                                }
+                            }
+                            return { found: false, disabled: false };
+                        """)
+                        if submit_state2.get('disabled'):
+                            print("Import button disabled after JS re-click (request submitted).")
+                            submit_confirmed = True
+                            break
+                        time.sleep(1)
+                    if not submit_confirmed:
+                        raise Exception("Import submission not confirmed after JS re-click; retrying import flow.")
 
                 # ── Step 5: Wait for "See your story" / redirect to editor ────────
                 print("Waiting for import to complete...")
@@ -636,6 +658,10 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                             if "/edit" in driver.current_url or "/p/" in driver.current_url:
                                 print(f"Recovered via drafts list. Current URL: {driver.current_url}")
                                 see_story_clicked = True
+                        else:
+                            # No draft link found — the import likely never created a
+                            # draft. Surface this so the retry loop re-runs the flow.
+                            print("No draft edit link found on drafts page; import did not create a draft.")
                     except Exception as rec_err:
                         print(f"Drafts-list recovery failed: {rec_err}")
                     if not see_story_clicked:
