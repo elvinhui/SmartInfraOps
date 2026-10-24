@@ -523,9 +523,10 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         }
                     """)
                     time.sleep(3)
-                    # Re-verify submission after the forced JS click; if still not
-                    # confirmed, treat this attempt as failed so the retry loop
-                    # can re-navigate and re-enter the URL cleanly.
+                    # Re-verify submission after the forced JS click. Medium does not
+                    # reliably disable the Import button after submission, so also
+                    # accept other signals: URL input cleared, spinner/processing text,
+                    # or navigation away from the import page.
                     for _submit_wait2 in range(10):
                         submit_state2 = driver.execute_script("""
                             var btns = document.querySelectorAll('button');
@@ -533,13 +534,22 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                                 var txt = (btns[i].innerText || btns[i].textContent || '').toLowerCase().trim();
                                 if (txt.includes('import')) {
                                     var disabled = btns[i].disabled || btns[i].getAttribute('aria-disabled') === 'true';
-                                    return { found: true, disabled: disabled };
+                                    if (disabled) return { found: true, submitted: true };
                                 }
                             }
-                            return { found: false, disabled: false };
+                            var inp = document.querySelector('.js-importUrl, input:not([type=\"hidden\"])');
+                            if (inp && inp.value === '') return { found: true, submitted: true };
+                            var allText = document.body ? document.body.innerText.toLowerCase() : '';
+                            if (allText.includes('importing') || allText.includes('processing') || allText.includes('please wait')) {
+                                return { found: true, submitted: true };
+                            }
+                            if (window.location.href.indexOf('/p/import') === -1) {
+                                return { found: true, submitted: true };
+                            }
+                            return { found: false, submitted: false };
                         """)
-                        if submit_state2.get('disabled'):
-                            print("Import button disabled after JS re-click (request submitted).")
+                        if submit_state2.get('submitted'):
+                            print("Import submission confirmed after JS re-click.")
                             submit_confirmed = True
                             break
                         time.sleep(1)
