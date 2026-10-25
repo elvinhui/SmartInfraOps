@@ -554,7 +554,12 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                             break
                         time.sleep(1)
                     if not submit_confirmed:
-                        raise Exception("Import submission not confirmed after JS re-click; retrying import flow.")
+                        # Medium does not reliably disable the Import button or clear the
+                        # URL input after submission. Treat the forced JS click as a
+                        # best-effort submission and let the downstream editor-wait /
+                        # drafts-list recovery logic determine actual success.
+                        print("Import submission not explicitly confirmed; proceeding to wait for editor (best-effort).")
+                        submit_confirmed = True
 
                 # ── Step 5: Wait for "See your story" / redirect to editor ────────
                 print("Waiting for import to complete...")
