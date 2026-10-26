@@ -512,6 +512,17 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         break
                     time.sleep(1)
                 if not submit_confirmed:
+                    # Before forcing a re-click, verify the URL field still holds the
+                    # canonical URL. If React swallowed the value, the Import click
+                    # submits an empty URL and Medium never creates a draft.
+                    _url_still_present = driver.execute_script("""
+                        var el = document.querySelector('.js-importUrl, input:not([type=\"hidden\"])');
+                        if (!el) return false;
+                        var v = (el.value !== undefined ? el.value : el.textContent) || '';
+                        return v.trim().length > 0;
+                    """)
+                    if not _url_still_present:
+                        raise Exception("URL field is empty before Import submission; React did not commit the value.")
                     # The click may not have registered with React. Re-click the
                     # Import button once via JS to force submission before polling.
                     print("Import button did not become disabled; re-clicking via JS to force submission...")
@@ -623,6 +634,15 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         # editor transition / 'See your story' on the next iteration.
                         # A persistent spinner with no transition is a known Medium
                         # failure mode; the loop timeout below handles it.
+                        # Bail out early if the spinner persists too long without any
+                        # editor transition — Medium's import has silently failed.
+                        _spinner_streak = globals().get('_spinner_streak', 0) + 1
+                        globals()['_spinner_streak'] = _spinner_streak
+                        if _spinner_streak >= 45:
+                            print("Spinner persisted too long without editor transition; aborting wait.")
+                            break
+                    else:
+                        globals()['_spinner_streak'] = 0
 
                     # Detect that the import request was accepted: the Import button
                     # becomes disabled or the URL input is cleared after submission.
