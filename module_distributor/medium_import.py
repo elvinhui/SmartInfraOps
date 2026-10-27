@@ -636,13 +636,12 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         # failure mode; the loop timeout below handles it.
                         # Bail out early if the spinner persists too long without any
                         # editor transition — Medium's import has silently failed.
-                        _spinner_streak = globals().get('_spinner_streak', 0) + 1
-                        globals()['_spinner_streak'] = _spinner_streak
+                        _spinner_streak = locals().get('_spinner_streak', 0) + 1
                         if _spinner_streak >= 45:
                             print("Spinner persisted too long without editor transition; aborting wait.")
                             break
                     else:
-                        globals()['_spinner_streak'] = 0
+                        _spinner_streak = 0
 
                     # Detect that the import request was accepted: the Import button
                     # becomes disabled or the URL input is cleared after submission.
