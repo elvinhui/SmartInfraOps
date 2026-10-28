@@ -246,8 +246,12 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                             btnRendered = rect.width > 40 && rect.height > 20;
                         }
 
+                        // The Import button may not report non-zero dimensions in headless/Xvfb
+                        // environments even when the page is fully functional. Treat the page
+                        // as ready if the core structure (stylesheets, import button, input,
+                        // styling) is present; btnRendered is only a soft signal.
                         return {
-                            ready: hasStylesheets && hasImportBtn && hasInput && isStyled && btnRendered,
+                            ready: hasStylesheets && hasImportBtn && hasInput && isStyled,
                             sheets: document.styleSheets.length,
                             buttons: document.querySelectorAll('button').length,
                             bodyLen: bodyLen,
