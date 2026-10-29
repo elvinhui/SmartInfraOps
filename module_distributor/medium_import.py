@@ -230,7 +230,9 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         // Medium's import page may use either an <input> or a contenteditable <div>
                         // for the URL field, so accept either as a valid input indicator.
                         var hasInput = !!document.querySelector('input:not([type="hidden"])') ||
-                                       !!document.querySelector('div[contenteditable="true"]');
+                                       !!document.querySelector('div[contenteditable="true"]') ||
+                                       !!document.querySelector('.js-importUrl, [data-default-value*="yoursite"]') ||
+                                       !!document.querySelector('textarea');
 
                         // Critical: check that the page is actually styled/rendered, not degraded
                         // A degraded page may have stylesheets loaded but no actual CSS applied
@@ -250,8 +252,12 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         // environments even when the page is fully functional. Treat the page
                         // as ready if the core structure (stylesheets, import button, input,
                         // styling) is present; btnRendered is only a soft signal.
+                        // The URL input may not be present in the initial DOM (Medium
+                        // sometimes renders it lazily after the import button). Treat
+                        // the page as ready if the core structure is present; the
+                        // downstream input-finding loop handles the input itself.
                         return {
-                            ready: hasStylesheets && hasImportBtn && hasInput && isStyled,
+                            ready: hasStylesheets && hasImportBtn && isStyled,
                             sheets: document.styleSheets.length,
                             buttons: document.querySelectorAll('button').length,
                             bodyLen: bodyLen,
