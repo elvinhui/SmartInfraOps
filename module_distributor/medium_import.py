@@ -344,31 +344,54 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
 
                             url_entered = False
 
-                            # Method 1: ActionChains focus + ActionChains typing (most reliable for trusted input)
+                            # Method 1: For contenteditable divs, use execCommand insertText which
+                            # fires React's input listeners reliably. For real inputs, use
+                            # ActionChains typing (trusted input).
                             try:
-                                ActionChains(driver).move_to_element(input_elem).click().perform()
-                                time.sleep(0.3)
-                                # Select all existing text and delete it
-                                ActionChains(driver).key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
-                                time.sleep(0.2)
-                                ActionChains(driver).send_keys(Keys.DELETE).perform()
-                                time.sleep(0.2)
-                                # Type the URL character by character via ActionChains (sends to focused element)
-                                for char in canonical_url:
-                                    ActionChains(driver).send_keys(char).perform()
-                                    time.sleep(random.uniform(0.03, 0.08))
-                                # Verify the value actually landed in the element (React may have swallowed it)
+                                if tag == 'div':
+                                    # Focus and clear the contenteditable div, then insert text
+                                    # via execCommand so React's synthetic events fire.
+                                    driver.execute_script("arguments[0].focus();", input_elem)
+                                    time.sleep(0.3)
+                                    driver.execute_script("""
+                                        var el = arguments[0];
+                                        el.focus();
+                                        var sel = window.getSelection();
+                                        var range = document.createRange();
+                                        range.selectNodeContents(el);
+                                        sel.removeAllRanges();
+                                        sel.addRange(range);
+                                        document.execCommand('delete', false, null);
+                                    """, input_elem)
+                                    time.sleep(0.2)
+                                    driver.execute_script("""
+                                        var el = arguments[0], url = arguments[1];
+                                        el.focus();
+                                        document.execCommand('insertText', false, url);
+                                        el.dispatchEvent(new InputEvent('input', { bubbles: true, data: url, inputType: 'insertText' }));
+                                    """, input_elem, canonical_url)
+                                    time.sleep(0.5)
+                                else:
+                                    ActionChains(driver).move_to_element(input_elem).click().perform()
+                                    time.sleep(0.3)
+                                    ActionChains(driver).key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
+                                    time.sleep(0.2)
+                                    ActionChains(driver).send_keys(Keys.DELETE).perform()
+                                    time.sleep(0.2)
+                                    for char in canonical_url:
+                                        ActionChains(driver).send_keys(char).perform()
+                                        time.sleep(random.uniform(0.03, 0.08))
                                 actual_value = driver.execute_script(
                                     "var el = arguments[0]; return (el.value !== undefined ? el.value : el.textContent) || '';",
                                     input_elem,
                                 )
                                 if canonical_url.strip() in (actual_value or ''):
                                     url_entered = True
-                                    print("URL entered via ActionChains typing.")
+                                    print("URL entered via primary method.")
                                 else:
-                                    print(f"ActionChains typing did not persist (got: {actual_value!r}). Trying next method.")
+                                    print(f"Primary typing did not persist (got: {actual_value!r}). Trying next method.")
                             except Exception as e1:
-                                print(f"ActionChains typing failed: {e1}")
+                                print(f"Primary typing failed: {e1}")
 
                             # Method 2: element.send_keys (standard Selenium)
                             if not url_entered:
@@ -526,7 +549,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                     # canonical URL. If React swallowed the value, the Import click
                     # submits an empty URL and Medium never creates a draft.
                     _url_still_present = driver.execute_script("""
-                        var el = document.querySelector('.js-importUrl, input:not([type=\"hidden\"])');
+                        var el = document.querySelector('.js-importUrl, [data-default-value*=\"yoursite\"], input:not([type=\"hidden\"]), div[contenteditable=\"true\"]');
                         if (!el) return false;
                         var v = (el.value !== undefined ? el.value : el.textContent) || '';
                         return v.trim().length > 0;
@@ -558,8 +581,11 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                                     if (disabled) return { found: true, submitted: true };
                                 }
                             }
-                            var inp = document.querySelector('.js-importUrl, input:not([type=\"hidden\"])');
-                            if (inp && inp.value === '') return { found: true, submitted: true };
+                            var inp = document.querySelector('.js-importUrl, [data-default-value*=\"yoursite\"], input:not([type=\"hidden\"]), div[contenteditable=\"true\"]');
+                            if (inp) {
+                                var iv = (inp.value !== undefined ? inp.value : inp.textContent) || '';
+                                if (iv.trim() === '') return { found: true, submitted: true };
+                            }
                             var allText = document.body ? document.body.innerText.toLowerCase() : '';
                             if (allText.includes('importing') || allText.includes('processing') || allText.includes('please wait')) {
                                 return { found: true, submitted: true };
@@ -663,8 +689,11 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                                 if (btns[i].disabled || btns[i].getAttribute('aria-disabled') === 'true') return true;
                             }
                         }
-                        var inp = document.querySelector('.js-importUrl, input:not([type=\"hidden\"])');
-                        if (inp && inp.value === '') return true;
+                        var inp = document.querySelector('.js-importUrl, [data-default-value*=\"yoursite\"], input:not([type=\"hidden\"]), div[contenteditable=\"true\"]');
+                        if (inp) {
+                            var iv = (inp.value !== undefined ? inp.value : inp.textContent) || '';
+                            if (iv.trim() === '') return true;
+                        }
                         return false;
                     """)
                     if submitted:
