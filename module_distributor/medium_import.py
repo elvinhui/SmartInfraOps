@@ -612,6 +612,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                 print("Waiting for import to complete...")
                 see_story_clicked = False
                 import_error_msg = None
+                _spinner_streak = 0
                 # Medium's import can take a while; poll up to ~3 minutes
                 for _ in range(90):
                     time.sleep(2)
@@ -672,7 +673,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         # failure mode; the loop timeout below handles it.
                         # Bail out early if the spinner persists too long without any
                         # editor transition — Medium's import has silently failed.
-                        _spinner_streak = locals().get('_spinner_streak', 0) + 1
+                        _spinner_streak += 1
                         if _spinner_streak >= 45:
                             print("Spinner persisted too long without editor transition; aborting wait.")
                             break
