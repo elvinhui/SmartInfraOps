@@ -608,6 +608,12 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         print("Import submission not explicitly confirmed; proceeding to wait for editor (best-effort).")
                         submit_confirmed = True
 
+                # Give Medium's backend a moment to register the import request
+                # before we start polling for the editor. Without this, the spinner
+                # detection can fire on a stale page state and the drafts-list
+                # recovery runs before the draft is actually created.
+                time.sleep(5)
+
                 # ── Step 5: Wait for "See your story" / redirect to editor ────────
                 print("Waiting for import to complete...")
                 see_story_clicked = False
@@ -674,7 +680,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         # Bail out early if the spinner persists too long without any
                         # editor transition — Medium's import has silently failed.
                         _spinner_streak += 1
-                        if _spinner_streak >= 45:
+                        if _spinner_streak >= 60:
                             print("Spinner persisted too long without editor transition; aborting wait.")
                             break
                     else:
@@ -710,7 +716,10 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                     print("No editor transition detected. Attempting drafts-list recovery...")
                     try:
                         driver.get("https://medium.com/me/stories/drafts")
-                        time.sleep(6)
+                        time.sleep(10)
+                        # Force a reload in case the SPA cached an empty drafts list
+                        driver.refresh()
+                        time.sleep(8)
                         # Collect candidate draft edit links and navigate directly
                         # (clicking can be intercepted by overlays / SPA routing).
                         edit_href = driver.execute_script("""
