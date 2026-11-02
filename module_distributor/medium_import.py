@@ -738,9 +738,24 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                             print(f"Opening most recent draft: {edit_href}")
                             driver.get(edit_href)
                             time.sleep(8)
-                            if "/edit" in driver.current_url or "/p/" in driver.current_url:
-                                print(f"Recovered via drafts list. Current URL: {driver.current_url}")
-                                see_story_clicked = True
+                            # Only accept a real editor URL — reject the import page
+                            # itself (which also matches '/p/') and wait for the
+                            # contenteditable editor to actually mount.
+                            if "/edit" in driver.current_url or ("/p/" in driver.current_url and "import" not in driver.current_url):
+                                editor_ready = False
+                                for _ed_wait in range(20):
+                                    has_ed = driver.execute_script(
+                                        "return !!document.querySelector('[contenteditable=\"true\"]');"
+                                    )
+                                    if has_ed:
+                                        editor_ready = True
+                                        break
+                                    time.sleep(1)
+                                if editor_ready:
+                                    print(f"Recovered via drafts list. Current URL: {driver.current_url}")
+                                    see_story_clicked = True
+                                else:
+                                    print("Draft opened but editor contenteditable did not mount.")
                         else:
                             # No draft link found — the import likely never created a
                             # draft. Surface this so the retry loop re-runs the flow.
@@ -791,15 +806,21 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
             _set_clipboard(polished_html, is_html=True)
             time.sleep(0.5)
 
-            # Focus first contenteditable (Medium editor)
-            focused = driver.execute_script("""
-                var editors = document.querySelectorAll('[contenteditable="true"]');
-                if (editors.length > 0) {
-                    editors[0].focus();
-                    return true;
-                }
-                return false;
-            """)
+            # Focus first contenteditable (Medium editor). The editor can take
+            # several seconds to mount after navigation, so poll before failing.
+            focused = False
+            for _focus_wait in range(30):
+                focused = driver.execute_script("""
+                    var editors = document.querySelectorAll('[contenteditable="true"]');
+                    if (editors.length > 0) {
+                        editors[0].focus();
+                        return true;
+                    }
+                    return false;
+                """)
+                if focused:
+                    break
+                time.sleep(1)
             if not focused:
                 driver.save_screenshot("module_distributor/error_medium_no_editor.png")
                 raise Exception("Could not find Medium editor contenteditable.")
