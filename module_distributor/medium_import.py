@@ -256,8 +256,13 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         // sometimes renders it lazily after the import button). Treat
                         // the page as ready if the core structure is present; the
                         // downstream input-finding loop handles the input itself.
+                        // Accept the page as ready if the core structure is present.
+                        // The Import button may be absent on a degraded/rate-limited
+                        // render while the URL input is still usable; the downstream
+                        // input-finding and button-finding loops handle those cases.
+                        var ready = hasStylesheets && isStyled && (hasImportBtn || hasInput);
                         return {
-                            ready: hasStylesheets && hasImportBtn && isStyled,
+                            ready: ready,
                             sheets: document.styleSheets.length,
                             buttons: document.querySelectorAll('button').length,
                             bodyLen: bodyLen,
@@ -274,6 +279,10 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         # Try a full page refresh after 5 failed attempts
                         print("Refreshing import page...")
                         driver.refresh()
+                    elif load_check >= 8:
+                        # Re-navigate to the import URL to escape a stuck SPA state
+                        print("Re-navigating to import page...")
+                        driver.get("https://medium.com/p/import")
                     time.sleep(3)
 
                 if not page_is_ready:
