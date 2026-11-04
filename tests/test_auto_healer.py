@@ -374,6 +374,7 @@ def test_cli_main_audit_fix_and_heal_run(tmp_path: Path, monkeypatch):
     gh_out = tmp_path / "github_output.txt"
     monkeypatch.setenv("GITHUB_OUTPUT", str(gh_out))
     monkeypatch.setenv("NOC_WEBHOOK_URL", "")
+    monkeypatch.setenv("SLACK_WEBHOOK_URL", "")
 
     req_file = tmp_path / "requirements.txt"
     req_file.write_text("requests>=2.31.0\n", encoding="utf-8")
