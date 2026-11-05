@@ -260,7 +260,13 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         // The Import button may be absent on a degraded/rate-limited
                         // render while the URL input is still usable; the downstream
                         // input-finding and button-finding loops handle those cases.
-                        var ready = hasStylesheets && isStyled && (hasImportBtn || hasInput);
+                        // Accept the page as ready if it is styled and has stylesheets.
+                        // The import button and URL input may be rendered lazily or be
+                        // absent on a degraded render; the downstream input-finding and
+                        // button-finding loops already handle those cases with their own
+                        // retries. Requiring hasImportBtn/hasInput here caused every
+                        // check to fail on a styled-but-buttonless render.
+                        var ready = hasStylesheets && isStyled;
                         return {
                             ready: ready,
                             sheets: document.styleSheets.length,
