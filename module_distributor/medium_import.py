@@ -266,13 +266,18 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         // button-finding loops already handle those cases with their own
                         // retries. Requiring hasImportBtn/hasInput here caused every
                         // check to fail on a styled-but-buttonless render.
-                        var ready = hasStylesheets && isStyled;
+                        // Require at least one button OR a usable input to consider the
+                        // page ready. A styled page with zero buttons and no input is a
+                        // degraded/rate-limited render and must be retried.
+                        var hasAnyButton = document.querySelectorAll('button').length > 0;
+                        var ready = hasStylesheets && isStyled && (hasAnyButton || hasInput);
                         return {
                             ready: ready,
                             sheets: document.styleSheets.length,
                             buttons: document.querySelectorAll('button').length,
                             bodyLen: bodyLen,
                             isStyled: isStyled,
+                            hasInput: hasInput,
                             btnRendered: btnRendered
                         };
                     """)
@@ -300,6 +305,17 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
 
                 found_input = False
                 for retry in range(15):
+                    # If the page has degraded (no buttons / no input) mid-loop, force a
+                    # re-navigation to escape a stuck SPA/rate-limited state.
+                    if retry > 0 and retry % 5 == 0:
+                        _probe = driver.execute_script(
+                            "return {buttons: document.querySelectorAll('button').length, "
+                            "hasInput: !!document.querySelector('input:not([type=\"hidden\"]), textarea, div[contenteditable=\"true\"]')};"
+                        )
+                        if not _probe.get('hasInput'):
+                            print(f"No input present (buttons={_probe.get('buttons')}); re-navigating to import page...")
+                            driver.get("https://medium.com/p/import")
+                            time.sleep(5)
                     input_elem = driver.execute_script("""
                         function isEditable(el) {
                             if (!el) return false;
