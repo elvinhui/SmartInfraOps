@@ -270,7 +270,11 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         // page ready. A styled page with zero buttons and no input is a
                         // degraded/rate-limited render and must be retried.
                         var hasAnyButton = document.querySelectorAll('button').length > 0;
-                        var ready = hasStylesheets && isStyled && (hasAnyButton || hasInput);
+                        // A styled page with stylesheets is usable even if buttons/inputs
+                        // are rendered lazily. The downstream input-finding and
+                        // button-finding loops have their own retries and re-navigation
+                        // logic, so do not hard-fail here on a buttonless render.
+                        var ready = hasStylesheets && isStyled;
                         return {
                             ready: ready,
                             sheets: document.styleSheets.length,
