@@ -311,7 +311,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                 for retry in range(15):
                     # If the page has degraded (no buttons / no input) mid-loop, force a
                     # re-navigation to escape a stuck SPA/rate-limited state.
-                    if retry > 0 and retry % 5 == 0:
+                    if retry > 0 and retry % 3 == 0:
                         _probe = driver.execute_script(
                             "return {buttons: document.querySelectorAll('button').length, "
                             "hasInput: !!document.querySelector('input:not([type=\"hidden\"]), textarea, div[contenteditable=\"true\"]')};"
@@ -320,6 +320,16 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                             print(f"No input present (buttons={_probe.get('buttons')}); re-navigating to import page...")
                             driver.get("https://medium.com/p/import")
                             time.sleep(5)
+                            # If the page is still buttonless after re-navigation, try a
+                            # hard reload to escape a cached degraded SPA render.
+                            _probe2 = driver.execute_script(
+                                "return {buttons: document.querySelectorAll('button').length, "
+                                "hasInput: !!document.querySelector('input:not([type=\"hidden\"]), textarea, div[contenteditable=\"true\"]')};"
+                            )
+                            if not _probe2.get('hasInput') and _probe2.get('buttons', 0) == 0:
+                                print("Page still degraded after re-navigation; forcing hard reload...")
+                                driver.refresh()
+                                time.sleep(6)
                     input_elem = driver.execute_script("""
                         function isEditable(el) {
                             if (!el) return false;
