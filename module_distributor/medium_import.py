@@ -274,7 +274,9 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         // are rendered lazily. The downstream input-finding and
                         // button-finding loops have their own retries and re-navigation
                         // logic, so do not hard-fail here on a buttonless render.
-                        var ready = hasStylesheets && isStyled;
+                        // However, a render with zero buttons AND no usable input is a
+                        // degraded/rate-limited page and must NOT be treated as ready.
+                        var ready = hasStylesheets && isStyled && (hasAnyButton || hasInput);
                         return {
                             ready: ready,
                             sheets: document.styleSheets.length,
@@ -302,7 +304,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
 
                 if not page_is_ready:
                     driver.save_screenshot(f"module_distributor/error_medium_page_degraded_attempt{import_retry + 1}.png")
-                    raise Exception(f"Import page failed to fully render after 12 checks (likely rate-limited). bodyLen={page_ready.get('bodyLen')}, styled={page_ready.get('isStyled')}")
+                    raise Exception(f"Import page failed to fully render after 12 checks (likely rate-limited). bodyLen={page_ready.get('bodyLen')}, styled={page_ready.get('isStyled')}, buttons={page_ready.get('buttons')}, hasInput={page_ready.get('hasInput')}")
 
                 # ── Step 3: Enter the canonical URL ───────────────────────────────
                 print(f"Entering canonical URL: {canonical_url}")
