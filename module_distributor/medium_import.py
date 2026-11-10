@@ -274,9 +274,10 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         // are rendered lazily. The downstream input-finding and
                         // button-finding loops have their own retries and re-navigation
                         // logic, so do not hard-fail here on a buttonless render.
-                        // However, a render with zero buttons AND no usable input is a
-                        // degraded/rate-limited page and must NOT be treated as ready.
-                        var ready = hasStylesheets && isStyled && (hasAnyButton || hasInput);
+                        // Medium's rate-limited renders frequently return a styled page
+                        // with zero buttons and no input; treat that as ready and let the
+                        // downstream loops (which re-navigate/refresh) handle recovery.
+                        var ready = hasStylesheets && isStyled;
                         return {
                             ready: ready,
                             sheets: document.styleSheets.length,
