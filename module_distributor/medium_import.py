@@ -277,7 +277,10 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         // Medium's rate-limited renders frequently return a styled page
                         // with zero buttons and no input; treat that as ready and let the
                         // downstream loops (which re-navigate/refresh) handle recovery.
-                        var ready = hasStylesheets && isStyled;
+                        // Require an actual usable input OR at least one button. A styled
+                        // page with zero buttons and no input is a degraded/rate-limited
+                        // render and must be retried rather than treated as ready.
+                        var ready = hasStylesheets && isStyled && (hasInput || hasAnyButton);
                         return {
                             ready: ready,
                             sheets: document.styleSheets.length,
@@ -314,7 +317,7 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                 for retry in range(15):
                     # If the page has degraded (no buttons / no input) mid-loop, force a
                     # re-navigation to escape a stuck SPA/rate-limited state.
-                    if retry > 0 and retry % 3 == 0:
+                    if retry > 0 and (retry % 3 == 0 or retry == 1):
                         _probe = driver.execute_script(
                             "return {buttons: document.querySelectorAll('button').length, "
                             "hasInput: !!document.querySelector('input:not([type=\"hidden\"]), textarea, div[contenteditable=\"true\"]')};"
