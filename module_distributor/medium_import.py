@@ -320,7 +320,11 @@ def push_to_medium(canonical_url: str, title: str, polished_markdown: str = "", 
                         // are absent on a rate-limited render. The downstream input-finding
                         // and button-finding loops have their own retries and re-navigation
                         // logic to recover from a buttonless/inputless render.
-                        var ready = hasStylesheets && isStyled;
+                        // Require a usable input OR at least one button in addition to
+                        // styling. A styled page with zero buttons and no input is a
+                        // degraded/rate-limited render and must be retried.
+                        var hasAnyButton = document.querySelectorAll('button').length > 0;
+                        var ready = hasStylesheets && isStyled && (hasInput || hasAnyButton);
                         return {
                             ready: ready,
                             sheets: document.styleSheets.length,
